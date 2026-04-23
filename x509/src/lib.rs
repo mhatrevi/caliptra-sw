@@ -27,6 +27,8 @@ mod ldevid_cert_mldsa_87;
 mod ldevid_csr_ecc_384;
 mod ldevid_csr_mldsa_87;
 mod ocp_lock_hpke_certs;
+mod pcr_signing_cert_ecc_384;
+mod pcr_signing_cert_mldsa_87;
 mod rt_alias_cert_ecc_384;
 mod rt_alias_cert_mldsa_87;
 mod rt_alias_csr_ecc_384;
@@ -48,6 +50,8 @@ pub use ldevid_cert_ecc_384::{LocalDevIdCertTbsEcc384, LocalDevIdCertTbsEcc384Pa
 pub use ldevid_cert_mldsa_87::{LocalDevIdCertTbsMlDsa87, LocalDevIdCertTbsMlDsa87Params};
 pub use ldevid_csr_ecc_384::{LocalDevIdCsrTbsEcc384, LocalDevIdCsrTbsEcc384Params};
 pub use ldevid_csr_mldsa_87::{LocalDevIdCsrTbsMlDsa87, LocalDevIdCsrTbsMlDsa87Params};
+pub use pcr_signing_cert_ecc_384::{PcrSigningCertTbsEcc384, PcrSigningCertTbsEcc384Params};
+pub use pcr_signing_cert_mldsa_87::{PcrSigningCertTbsMlDsa87, PcrSigningCertTbsMlDsa87Params};
 pub use rt_alias_cert_ecc_384::{RtAliasCertTbsEcc384, RtAliasCertTbsEcc384Params};
 pub use rt_alias_cert_mldsa_87::{RtAliasCertTbsMlDsa87, RtAliasCertTbsMlDsa87Params};
 pub use rt_alias_csr_ecc_384::{RtAliasCsrTbsEcc384, RtAliasCsrTbsEcc384Params};

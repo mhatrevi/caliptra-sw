@@ -71,6 +71,8 @@ pub fn initialize_fht(env: &mut RomEnv) {
         ecc_fmcalias_tbs_addr: &pdata.rom.ecc_fmcalias_tbs as *const _ as u32,
         mldsa_ldevid_tbs_addr: &pdata.rom.mldsa_ldevid_tbs as *const _ as u32,
         mldsa_fmcalias_tbs_addr: &pdata.rom.mldsa_fmcalias_tbs as *const _ as u32,
+        ecc_pcr_signing_tbs_addr: &pdata.rom.ecc_pcr_signing_tbs as *const _ as u32,
+        mldsa_pcr_signing_tbs_addr: &pdata.rom.mldsa_pcr_signing_tbs as *const _ as u32,
         pcr_log_addr: &pdata.rom.pcr_log as *const _ as u32,
         meas_log_addr: &pdata.rom.measurement_log as *const _ as u32,
         fuse_log_addr: &pdata.rom.fuse_log as *const _ as u32,

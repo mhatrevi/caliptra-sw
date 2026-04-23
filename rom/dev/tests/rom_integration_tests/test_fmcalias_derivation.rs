@@ -882,7 +882,7 @@ fn test_check_rom_cold_boot_status_reg() {
 
         hw.step_until_boot_status(u32::from(ColdResetComplete), true);
 
-        let data_vault = hw.mailbox_execute(0x1000_0005, &[]).unwrap().unwrap();
+        let data_vault = helpers::read_datavault(&mut hw);
         let (data_vault, _) = DataVault::ref_from_prefix(data_vault.as_bytes()).unwrap();
 
         assert_eq!(

@@ -49,11 +49,11 @@ pub const ROM_STACK_ORG: u32 = STACK_ORG;
 
 /// Exception stack
 pub const ESTACK_ORG: u32 = STACK_ORG + STACK_SIZE;
-pub const ROM_ESTACK_ORG: u32 = ESTACK_ORG;
+pub const ROM_ESTACK_ORG: u32 = ROM_STACK_ORG + ROM_STACK_SIZE;
 
 /// NMI stack
 pub const NSTACK_ORG: u32 = ESTACK_ORG + ESTACK_SIZE;
-pub const ROM_NSTACK_ORG: u32 = NSTACK_ORG;
+pub const ROM_NSTACK_ORG: u32 = ROM_ESTACK_ORG + ROM_ESTACK_SIZE;
 
 /// Extra memory reserved for stack and/or persistent data growth
 pub const EXTRA_MEMORY_ORG: u32 = NSTACK_ORG + NSTACK_SIZE;
@@ -78,7 +78,7 @@ pub const ICCM_SIZE: u32 = 256 * 1024;
 pub const DCCM_SIZE: u32 = 256 * 1024;
 pub const ROM_DATA_SIZE: u32 = 1024;
 pub const ROM_DATA_RESERVED_SIZE: u32 = 996;
-pub const STACK_SIZE: u32 = 154 * 1024;
+pub const STACK_SIZE: u32 = 147 * 1024 + 512;
 pub const ROM_STACK_SIZE: u32 = 110 * 1024;
 pub const ESTACK_SIZE: u32 = 1024;
 pub const ROM_ESTACK_SIZE: u32 = 1024;

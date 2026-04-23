@@ -771,6 +771,46 @@ pub fn get_rt_alias_mldsa87_cert(model: &mut DefaultHwModel) -> GetLdevCertResp 
     rt_resp
 }
 
+pub fn get_pcr_signing_ecc_cert(model: &mut DefaultHwModel) -> GetFmcAliasEcc384CertResp {
+    let payload = MailboxReqHeader {
+        chksum: caliptra_common::checksum::calc_checksum(
+            u32::from(CommandId::GET_PCR_SIGNING_ECC384_CERT),
+            &[],
+        ),
+    };
+    let resp = model
+        .mailbox_execute(
+            u32::from(CommandId::GET_PCR_SIGNING_ECC384_CERT),
+            payload.as_bytes(),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(resp.len() <= std::mem::size_of::<GetFmcAliasEcc384CertResp>());
+    let mut pcr_resp = GetFmcAliasEcc384CertResp::default();
+    pcr_resp.as_mut_bytes()[..resp.len()].copy_from_slice(&resp);
+    pcr_resp
+}
+
+pub fn get_pcr_signing_mldsa_cert(model: &mut DefaultHwModel) -> GetFmcAliasMlDsa87CertResp {
+    let payload = MailboxReqHeader {
+        chksum: caliptra_common::checksum::calc_checksum(
+            u32::from(CommandId::GET_PCR_SIGNING_MLDSA87_CERT),
+            &[],
+        ),
+    };
+    let resp = model
+        .mailbox_execute(
+            u32::from(CommandId::GET_PCR_SIGNING_MLDSA87_CERT),
+            payload.as_bytes(),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(resp.len() <= std::mem::size_of::<GetFmcAliasMlDsa87CertResp>());
+    let mut pcr_resp = GetFmcAliasMlDsa87CertResp::default();
+    pcr_resp.as_mut_bytes()[..resp.len()].copy_from_slice(&resp);
+    pcr_resp
+}
+
 #[allow(dead_code)]
 /// Compare two X509 certs by semantic fields rather than raw bytes.
 pub fn assert_x509_semantic_eq(a: &X509, b: &X509) {

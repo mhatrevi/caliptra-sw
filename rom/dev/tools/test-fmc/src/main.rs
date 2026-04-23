@@ -19,7 +19,8 @@ use caliptra_common::PcrLogEntry;
 use caliptra_common::{mailbox_api, FuseLogEntry, FuseLogEntryId};
 use caliptra_drivers::pcr_log::MeasurementLogEntry;
 use caliptra_drivers::{
-    DataVault, LEArray4x8, Mailbox, PcrBank, PcrId, PersistentDataAccessor, SocIfc,
+    AxiAddr, DataVault, Dma, LEArray4x8, Mailbox, PcrBank, PcrId, PersistentDataAccessor,
+    SocIfc,
 };
 use caliptra_registers::pv::PvReg;
 use caliptra_registers::soc_ifc::SocIfcReg;
@@ -186,10 +187,10 @@ fn create_certs(mbox: &caliptra_registers::mbox::RegisterBlock<RealMmioMut>) {
 fn copy_tbs(tbs: &mut [u8], ldevid_tbs: bool) {
     let persistent_data = unsafe { PersistentDataAccessor::new() };
     // Copy the tbs from DCCM
-    let src = if ldevid_tbs {
-        &persistent_data.get().rom.ecc_ldevid_tbs
+    let src: &[u8] = if ldevid_tbs {
+        &persistent_data.get().rom.ecc_ldevid_tbs[..]
     } else {
-        &persistent_data.get().rom.ecc_fmcalias_tbs
+        &persistent_data.get().rom.ecc_fmcalias_tbs[..]
     };
     tbs.copy_from_slice(&src[..tbs.len()]);
 }
@@ -385,6 +386,40 @@ fn read_pcr31(mbox: &caliptra_registers::mbox::RegisterBlock<RealMmioMut>) {
 fn read_datavault(mbox: &caliptra_registers::mbox::RegisterBlock<RealMmioMut>) {
     let persistent_data = unsafe { PersistentDataAccessor::new() };
     let data_vault = &persistent_data.get().rom.data_vault;
+
+    let payload_len = mbox.dlen().read() as usize;
+    if payload_len == core::mem::size_of::<mailbox_api::AxiResponseInfo>() {
+        let axi_info = mailbox_api::AxiResponseInfo {
+            addr_lo: mbox.dataout().read(),
+            addr_hi: mbox.dataout().read(),
+            max_size: mbox.dataout().read(),
+        };
+
+        if axi_info.max_size < core::mem::size_of::<DataVault>() as u32 {
+            mbox.status().write(|w| w.status(|w| w.cmd_failure()));
+            return;
+        }
+
+        let data = data_vault.as_bytes();
+        let data_words = unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u32, data.len() / 4)
+        };
+        Dma {}.write_buffer(
+            AxiAddr {
+                lo: axi_info.addr_lo,
+                hi: axi_info.addr_hi,
+            },
+            data_words,
+        );
+
+        mbox.status().write(|w| w.status(|w| w.cmd_complete()));
+        return;
+    }
+
+    if payload_len != 0 {
+        mbox.status().write(|w| w.status(|w| w.cmd_failure()));
+        return;
+    }
 
     send_to_mailbox(mbox, data_vault.as_bytes(), false);
 

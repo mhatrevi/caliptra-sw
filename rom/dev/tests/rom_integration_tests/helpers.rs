@@ -7,12 +7,12 @@ use std::mem;
 
 use caliptra_api::SocManager;
 use caliptra_builder::{firmware, FwId, ImageOptions};
-use caliptra_common::mailbox_api::CommandId;
+use caliptra_common::mailbox_api::{AxiResponseInfo, CommandId};
 use caliptra_common::{
     memory_layout::{ROM_ORG, ROM_SIZE, ROM_STACK_ORG, ROM_STACK_SIZE, STACK_ORG, STACK_SIZE},
     FMC_ORG, FMC_SIZE, RUNTIME_ORG, RUNTIME_SIZE,
 };
-use caliptra_drivers::InitDevIdCsrEnvelope;
+use caliptra_drivers::{DataVault, InitDevIdCsrEnvelope};
 use caliptra_error::CaliptraError;
 use caliptra_hw_model::{
     BootParams, CodeRange, Fuses, HwModel, ImageInfo, InitParams, SecurityState, StackInfo,
@@ -20,7 +20,7 @@ use caliptra_hw_model::{
 };
 use caliptra_hw_model::{DefaultHwModel, DeviceLifecycle, ModelError};
 use caliptra_image_types::{FwVerificationPqcKeyType, ImageBundle};
-use zerocopy::TryFromBytes;
+use zerocopy::{IntoBytes, TryFromBytes};
 
 pub use caliptra_test::{default_soc_manifest_bytes, test_upload_firmware, DEFAULT_MCU_FW};
 
@@ -160,6 +160,25 @@ pub fn get_csr_envelop(hw: &mut DefaultHwModel) -> Result<InitDevIdCsrEnvelope, 
     hw.soc_ifc().cptra_dbg_manuf_service_reg().write(|_| 0);
     let (csr_envelop, _) = InitDevIdCsrEnvelope::try_read_from_prefix(&result).unwrap();
     Ok(csr_envelop)
+}
+
+pub fn read_datavault(hw: &mut DefaultHwModel) -> Vec<u8> {
+    if hw.subsystem_mode() {
+        let addr = hw.staging_physical_address().unwrap();
+        let axi_info = AxiResponseInfo {
+            addr_lo: addr as u32,
+            addr_hi: (addr >> 32) as u32,
+            max_size: mem::size_of::<DataVault>() as u32,
+        };
+
+        let resp = hw.mailbox_execute(0x1000_0005, axi_info.as_bytes()).unwrap();
+        assert!(resp.is_none());
+
+        hw.read_payload_from_ss_staging_area(mem::size_of::<DataVault>())
+            .unwrap()
+    } else {
+        hw.mailbox_execute(0x1000_0005, &[]).unwrap().unwrap()
+    }
 }
 
 pub fn change_dword_endianess(data: &mut [u8]) {

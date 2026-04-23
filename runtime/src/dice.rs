@@ -308,3 +308,62 @@ pub fn copy_rt_alias_mldsa87_cert(
     mldsa87_cert_from_tbs_and_sig(tbs, &persistent_data.fw.rt_dice_mldsa_sign, cert)
         .map_err(|_| CaliptraError::RUNTIME_GET_RT_ALIAS_CERT_FAILED)
 }
+
+pub struct GetPcrSigningCertCmd;
+impl GetPcrSigningCertCmd {
+    #[inline(never)]
+    pub(crate) fn execute(
+        drivers: &mut Drivers,
+        alg_type: AlgorithmType,
+        resp: &mut [u8],
+    ) -> CaliptraResult<usize> {
+        match alg_type {
+            AlgorithmType::Ecc384 => {
+                let resp = mutrefbytes::<GetFmcAliasEcc384CertResp>(resp)?;
+                resp.hdr = MailboxRespHeader::default();
+                resp.data_size =
+                    copy_pcr_signing_ecc384_cert(drivers.persistent_data.get(), &mut resp.data)?
+                        as u32;
+                resp.partial_len()
+            }
+            AlgorithmType::Mldsa87 => {
+                let resp = mutrefbytes::<GetFmcAliasMlDsa87CertResp>(resp)?;
+                resp.hdr = MailboxRespHeader::default();
+                resp.data_size =
+                    copy_pcr_signing_mldsa87_cert(drivers.persistent_data.get(), &mut resp.data)?
+                        as u32;
+                resp.partial_len()
+            }
+        }
+    }
+}
+
+/// Copy PCR signing ECC384 certificate produced by ROM to `cert` buffer
+#[inline(never)]
+pub fn copy_pcr_signing_ecc384_cert(
+    persistent_data: &PersistentData,
+    cert: &mut [u8],
+) -> CaliptraResult<usize> {
+    let tbs = persistent_data
+        .rom
+        .ecc_pcr_signing_tbs
+        .get(..persistent_data.rom.fht.ecc_pcr_signing_tbs_size.into());
+    let sig = persistent_data.rom.data_vault.pcr_signing_ecc_signature();
+    ecc384_cert_from_tbs_and_sig(tbs, &sig, cert)
+        .map_err(|_| CaliptraError::RUNTIME_GET_PCR_SIGNING_CERT_FAILED)
+}
+
+/// Copy PCR signing MLDSA87 certificate produced by ROM to `cert` buffer
+#[inline(never)]
+pub fn copy_pcr_signing_mldsa87_cert(
+    persistent_data: &PersistentData,
+    cert: &mut [u8],
+) -> CaliptraResult<usize> {
+    let tbs = persistent_data
+        .rom
+        .mldsa_pcr_signing_tbs
+        .get(..persistent_data.rom.fht.mldsa_pcr_signing_tbs_size.into());
+    let sig = persistent_data.rom.data_vault.pcr_signing_mldsa_signature();
+    mldsa87_cert_from_tbs_and_sig(tbs, &sig, cert)
+        .map_err(|_| CaliptraError::RUNTIME_GET_PCR_SIGNING_CERT_FAILED)
+}

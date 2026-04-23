@@ -115,7 +115,7 @@ impl From<DataStore> for HandOffDataHandle {
     }
 }
 
-const FHT_RESERVED_SIZE: usize = 1660;
+const FHT_RESERVED_SIZE: usize = 1660 - 12;
 
 /// The Firmware Handoff Table is a data structure that is resident at a well-known
 /// location in DCCM. It is initially populated by ROM and modified by FMC as a way
@@ -223,6 +223,18 @@ pub struct FirmwareHandoffTable {
     /// Index of FW key ladder value in the Key Vault.
     pub fw_key_ladder_kv_hdl: HandOffDataHandle,
 
+    /// ECC PCR Signing TBS Address
+    pub ecc_pcr_signing_tbs_addr: u32,
+
+    /// ECC PCR Signing TBS Size
+    pub ecc_pcr_signing_tbs_size: u16,
+
+    /// MLDSA PCR Signing TBS Size
+    pub mldsa_pcr_signing_tbs_size: u16,
+
+    /// MLDSA PCR Signing TBS Address
+    pub mldsa_pcr_signing_tbs_addr: u32,
+
     /// Reserved for future use.
     pub reserved: [u8; FHT_RESERVED_SIZE],
 }
@@ -262,6 +274,10 @@ impl Default for FirmwareHandoffTable {
             rtalias_ecc_tbs_size: 0,
             fw_key_ladder_max_svn: 0,
             fw_key_ladder_kv_hdl: HandOffDataHandle(0),
+            ecc_pcr_signing_tbs_addr: 0,
+            ecc_pcr_signing_tbs_size: 0,
+            mldsa_pcr_signing_tbs_size: 0,
+            mldsa_pcr_signing_tbs_addr: 0,
             reserved: [0u8; FHT_RESERVED_SIZE],
         }
     }
@@ -351,8 +367,8 @@ mod tests {
     use super::*;
     use core::mem;
     const FHT_SIZE: usize = 2048;
-    const KEY_ID_FMC_ECDSA_PRIV_KEY: KeyId = KeyId::KeyId7;
-    const KEY_ID_FMC_MLDSA_KEYPAIR_SEED: KeyId = KeyId::KeyId8;
+    const KEY_ID_FMC_ECDSA_PRIV_KEY: KeyId = KeyId::KeyId13;
+    const KEY_ID_FMC_MLDSA_KEYPAIR_SEED: KeyId = KeyId::KeyId14;
 
     fn fmc_ecc_priv_key_store() -> HandOffDataHandle {
         HandOffDataHandle(((Vault::KeyVault as u32) << 12) | KEY_ID_FMC_ECDSA_PRIV_KEY as u32)

@@ -1,7 +1,8 @@
 // Licensed under the Apache-2.0 license
 
 use crate::common::{
-    get_ecc_fmc_alias_cert, get_mldsa_fmc_alias_cert, run_rt_test, RuntimeTestArgs,
+    get_ecc_fmc_alias_cert, get_pcr_signing_ecc_cert, get_pcr_signing_mldsa_cert, run_rt_test,
+    RuntimeTestArgs,
 };
 use caliptra_api::SocManager;
 
@@ -76,15 +77,21 @@ fn test_pcr_quote_ecc() {
     // See if incrementing the reset counter worked
     assert_eq!(pcr7_reset_counter, 1);
 
-    // verify signature
+    // verify signature against PCR signing cert (not FMC Alias)
     let big_r = BigNum::from_slice(&resp.signature_r).unwrap();
     let big_s = BigNum::from_slice(&resp.signature_s).unwrap();
     let sig = EcdsaSig::from_private_components(big_r, big_s).unwrap();
 
+    let pcr_resp = get_pcr_signing_ecc_cert(&mut model);
+    let pcr_cert: X509 = X509::from_der(&pcr_resp.data[..pcr_resp.data_size as usize]).unwrap();
+    let pkey = pcr_cert.public_key().unwrap().ec_key().unwrap();
+    assert!(sig.verify(&resp.digest, &pkey).unwrap());
+
+    // Negative: FMC Alias cert should NOT verify the PCR quote signature
     let fmc_resp = get_ecc_fmc_alias_cert(&mut model);
     let fmc_cert: X509 = X509::from_der(&fmc_resp.data[..fmc_resp.data_size as usize]).unwrap();
-    let pkey = fmc_cert.public_key().unwrap().ec_key().unwrap();
-    assert!(sig.verify(&resp.digest, &pkey).unwrap());
+    let fmc_pkey = fmc_cert.public_key().unwrap().ec_key().unwrap();
+    assert!(!sig.verify(&resp.digest, &fmc_pkey).unwrap());
 }
 
 #[test]
@@ -141,9 +148,9 @@ fn test_pcr_quote_mldsa() {
     // See if incrementing the reset counter worked
     assert_eq!(pcr7_reset_counter, 1);
 
-    // verify signature
-    let fmc_resp = get_mldsa_fmc_alias_cert(&mut model);
-    let cert = Certificate::from_der(&fmc_resp.data[..fmc_resp.data_size as usize]).unwrap();
+    // verify signature against PCR signing cert (not FMC Alias)
+    let pcr_resp = get_pcr_signing_mldsa_cert(&mut model);
+    let cert = Certificate::from_der(&pcr_resp.data[..pcr_resp.data_size as usize]).unwrap();
     let pk_bytes = cert
         .tbs_certificate
         .subject_public_key_info

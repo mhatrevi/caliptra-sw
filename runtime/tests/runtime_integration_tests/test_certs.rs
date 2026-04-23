@@ -6,8 +6,9 @@
 use crate::common::PQC_KEY_TYPE;
 use crate::common::{
     execute_dpe_cmd, generate_test_x509_cert, get_ecc_fmc_alias_cert, get_mldsa_fmc_alias_cert,
-    get_rt_alias_ecc384_cert, get_rt_alias_mldsa87_cert, run_rt_test, run_rt_test_pqc, DpeResult,
-    RuntimeTestArgs, TEST_LABEL,
+    get_pcr_signing_ecc_cert, get_pcr_signing_mldsa_cert, get_rt_alias_ecc384_cert,
+    get_rt_alias_mldsa87_cert, run_rt_test, run_rt_test_pqc, DpeResult, RuntimeTestArgs,
+    TEST_LABEL,
 };
 use caliptra_api::SocManager;
 use caliptra_builder::firmware::{APP_WITH_UART, APP_WITH_UART_FPGA, FMC_WITH_UART};
@@ -386,6 +387,52 @@ fn test_fmc_alias_mldsa87_cert() {
     assert!(fmc_cert.verify(&ldev_cert.public_key().unwrap()).unwrap());
     assert_eq!(
         fmc_cert
+            .issuer_name()
+            .try_cmp(ldev_cert.subject_name())
+            .unwrap(),
+        core::cmp::Ordering::Equal
+    );
+}
+
+#[test]
+fn test_pcr_signing_ecc384_cert() {
+    let mut model = run_rt_test(RuntimeTestArgs::default());
+
+    let ldev_resp = get_ldev_ecc_cert(&mut model);
+    let ldev_cert: X509 = X509::from_der(&ldev_resp.data[..ldev_resp.data_size as usize]).unwrap();
+
+    let pcr_resp = get_pcr_signing_ecc_cert(&mut model);
+    let pcr_cert: X509 = X509::from_der(&pcr_resp.data[..pcr_resp.data_size as usize]).unwrap();
+
+    // Check the PCR signing cert is signed by LDevID
+    assert!(pcr_cert.verify(&ldev_cert.public_key().unwrap()).unwrap());
+
+    // Check issuer/subject name match
+    assert_eq!(
+        pcr_cert
+            .issuer_name()
+            .try_cmp(ldev_cert.subject_name())
+            .unwrap(),
+        core::cmp::Ordering::Equal
+    );
+}
+
+#[test]
+fn test_pcr_signing_mldsa87_cert() {
+    let mut model = run_rt_test(RuntimeTestArgs::default());
+
+    let ldev_resp = get_ldev_mldsa_cert(&mut model);
+    let ldev_cert: X509 = X509::from_der(&ldev_resp.data[..ldev_resp.data_size as usize]).unwrap();
+
+    let pcr_resp = get_pcr_signing_mldsa_cert(&mut model);
+    let pcr_cert: X509 = X509::from_der(&pcr_resp.data[..pcr_resp.data_size as usize]).unwrap();
+
+    // Check the PCR signing cert is signed by LDevID
+    assert!(pcr_cert.verify(&ldev_cert.public_key().unwrap()).unwrap());
+
+    // Check issuer/subject name match
+    assert_eq!(
+        pcr_cert
             .issuer_name()
             .try_cmp(ldev_cert.subject_name())
             .unwrap(),

@@ -108,6 +108,8 @@ impl CommandId {
     pub const GET_LDEV_ECC384_CERT: Self = Self(0x4C444556); // "LDEV"
     pub const GET_FMC_ALIAS_ECC384_CERT: Self = Self(0x43455246); // "CERF"
     pub const GET_RT_ALIAS_ECC384_CERT: Self = Self(0x43455252); // "CERR"
+    pub const GET_PCR_SIGNING_ECC384_CERT: Self = Self(0x50434543); // "PCEC"
+    pub const GET_PCR_SIGNING_MLDSA87_CERT: Self = Self(0x50434D43); // "PCMC"
 
     // MLDSA87 versions
     pub const GET_IDEV_MLDSA87_CERT: Self = Self(0x49444D43); // "IDMC"

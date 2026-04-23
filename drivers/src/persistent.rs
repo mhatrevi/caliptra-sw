@@ -34,18 +34,19 @@ pub use fw::*;
 pub const ECC384_MAX_IDEVID_CSR_SIZE: usize = 512;
 pub const ECC384_MAX_FMC_ALIAS_CSR_SIZE: usize = 896;
 pub const MAN1_SIZE: u32 = 17 * 1024;
-pub const MAN2_SIZE: u32 = 17 * 1024;
-pub const DATAVAULT_MAX_SIZE: u32 = 15 * 1024;
+pub const DATAVAULT_MAX_SIZE: u32 = 20 * 1024 - 512;
 pub const FHT_SIZE: u32 = 2 * 1024;
 pub const IDEVID_MLDSA_PUB_KEY_MAX_SIZE: u32 = 3 * 1024;
-pub const ECC_LDEVID_TBS_SIZE: u32 = 1024;
-pub const ECC_FMCALIAS_TBS_SIZE: u32 = 1024;
-pub const MLDSA_LDEVID_TBS_SIZE: u32 = 4 * 1024;
-pub const MLDSA_FMCALIAS_TBS_SIZE: u32 = 4 * 1024;
+pub const ECC_LDEVID_TBS_SIZE: u32 = 596;
+pub const ECC_FMCALIAS_TBS_SIZE: u32 = 920;
+pub const ECC_PCR_SIGNING_TBS_SIZE: u32 = 588;
+pub const MLDSA_LDEVID_TBS_SIZE: u32 = 3092;
+pub const MLDSA_FMCALIAS_TBS_SIZE: u32 = 3416;
+pub const MLDSA_PCR_SIGNING_TBS_SIZE: u32 = 3088;
 pub const PCR_LOG_SIZE: u32 = 1024;
 pub const MEASUREMENT_LOG_SIZE: u32 = 1024;
 pub const FUSE_LOG_SIZE: u32 = 1024;
-pub const IDEVID_CSR_ENVELOP_SIZE: u32 = 9 * 1024;
+pub const IDEVID_CSR_ENVELOP_SIZE: u32 = 8784;
 pub const MLDSA87_MAX_CSR_SIZE: usize = 8192;
 pub const PCR_LOG_MAX_COUNT: usize = 17;
 pub const FUSE_LOG_MAX_COUNT: usize = 62;
@@ -389,6 +390,8 @@ pub struct RomPersistentData {
     pub ecc_fmcalias_tbs: [u8; ECC_FMCALIAS_TBS_SIZE as usize],
     pub mldsa_ldevid_tbs: [u8; MLDSA_LDEVID_TBS_SIZE as usize],
     pub mldsa_fmcalias_tbs: [u8; MLDSA_FMCALIAS_TBS_SIZE as usize],
+    pub ecc_pcr_signing_tbs: [u8; ECC_PCR_SIGNING_TBS_SIZE as usize],
+    pub mldsa_pcr_signing_tbs: [u8; MLDSA_PCR_SIGNING_TBS_SIZE as usize],
 
     pub pcr_log: PcrLogArray,
     reserved3: [u8; PCR_LOG_SIZE as usize - size_of::<PcrLogArray>()],
@@ -400,7 +403,6 @@ pub struct RomPersistentData {
     reserved5: [u8; FUSE_LOG_SIZE as usize - size_of::<FuseLogArray>()],
 
     pub idevid_csr_envelop: InitDevIdCsrEnvelope,
-    reserved6: [u8; IDEVID_CSR_ENVELOP_SIZE as usize - size_of::<InitDevIdCsrEnvelope>()],
 
     pub cmb_aes_key_share0: LEArray4x8,
     pub cmb_aes_key_share1: LEArray4x8,
@@ -444,7 +446,7 @@ impl RomPersistentData {
                 memory_layout::PERSISTENT_DATA_ORG + persistent_data_offset
             );
 
-            persistent_data_offset += MAN2_SIZE;
+            persistent_data_offset += MAN1_SIZE;
             assert_eq!(
                 addr_of!((*P).rom.data_vault) as u32,
                 memory_layout::PERSISTENT_DATA_ORG + persistent_data_offset
@@ -487,6 +489,18 @@ impl RomPersistentData {
             );
 
             persistent_data_offset += MLDSA_FMCALIAS_TBS_SIZE;
+            assert_eq!(
+                addr_of!((*P).rom.ecc_pcr_signing_tbs) as u32,
+                memory_layout::PERSISTENT_DATA_ORG + persistent_data_offset
+            );
+
+            persistent_data_offset += ECC_PCR_SIGNING_TBS_SIZE;
+            assert_eq!(
+                addr_of!((*P).rom.mldsa_pcr_signing_tbs) as u32,
+                memory_layout::PERSISTENT_DATA_ORG + persistent_data_offset
+            );
+
+            persistent_data_offset += MLDSA_PCR_SIGNING_TBS_SIZE;
             assert_eq!(
                 addr_of!((*P).rom.pcr_log) as u32,
                 memory_layout::PERSISTENT_DATA_ORG + persistent_data_offset
@@ -805,7 +819,7 @@ mod tests {
 
     #[test]
     fn test_rom_persistent_data_size() {
-        let expected_size = 60580;
+        let expected_size = 66216;
         if size_of::<RomPersistentData>() != expected_size {
             panic!(
                 "RomPersistentData size has changed from {} to {}. If this is intentional, update \
@@ -834,7 +848,7 @@ mod tests {
     fn test_rom_persistent_data_address() {
         let p = memory_layout::PERSISTENT_DATA_ORG as *const PersistentData;
         let rom_persistent_data_addr = unsafe { addr_of!((*p).rom) as u32 };
-        let expected_addr = 1342377820;
+        let expected_addr = 1342372184;
         if rom_persistent_data_addr != expected_addr {
             panic!(
                 "RomPersistentData address has changed from {} to {}. If this is \
@@ -850,7 +864,7 @@ mod tests {
     fn test_fw_persistent_data_address() {
         let p = memory_layout::PERSISTENT_DATA_ORG as *const PersistentData;
         let fw_persistent_data_addr = unsafe { addr_of!((*p).fw) as u32 };
-        let expected_addr = 1342337332;
+        let expected_addr = 1342331696;
         if fw_persistent_data_addr != expected_addr {
             panic!(
                 "FwPersistentData address has changed from {} to {}. If this is \
@@ -867,26 +881,26 @@ mod tests {
         let actual_expected = [
             (offset_of!(RomPersistentData, manifest1), 0, "manifest1"),
             (offset_of!(RomPersistentData, data_vault), 17408, "data_vault"),
-            (offset_of!(RomPersistentData, fht), 32768, "fht"),
-            (offset_of!(RomPersistentData, idevid_mldsa_pub_key), 34816, "idevid_mldsa_pub_key"),
-            (offset_of!(RomPersistentData, ecc_ldevid_tbs), 37888, "ecc_ldevid_tbs"),
-            (offset_of!(RomPersistentData, ecc_fmcalias_tbs), 38912, "ecc_fmcalias_tbs"),
-            (offset_of!(RomPersistentData, mldsa_ldevid_tbs), 39936, "mldsa_ldevid_tbs"),
-            (offset_of!(RomPersistentData, mldsa_fmcalias_tbs), 44032, "mldsa_fmcalias_tbs"),
-            (offset_of!(RomPersistentData, pcr_log), 48128, "pcr_log"),
-            (offset_of!(RomPersistentData, measurement_log), 49152, "measurement_log"),
-            (offset_of!(RomPersistentData, fuse_log), 50176, "fuse_log"),
-            (offset_of!(RomPersistentData, idevid_csr_envelop), 51200, "idevid_csr_envelop"),
-            (offset_of!(RomPersistentData, cmb_aes_key_share0), 60416, "cmb_aes_key_share0"),
-            (offset_of!(RomPersistentData, cmb_aes_key_share1), 60448, "cmb_aes_key_share1"),
-            (offset_of!(RomPersistentData, dot_owner_pk_hash), 60480, "dot_owner_pk_hash"),
-            (offset_of!(RomPersistentData, cleared_non_fatal_fw_error), 60532, "cleared_non_fatal_fw_error"),
-            (offset_of!(RomPersistentData, ocp_lock_metadata), 60536, "ocp_lock_metadata"),
-            (offset_of!(RomPersistentData, entropy_cfg), 60544, "entropy_cfg"),
-            (offset_of!(RomPersistentData, boot_mode), 60568, "boot_mode"),
-            (offset_of!(RomPersistentData, major_version), 60572, "major_version"),
-            (offset_of!(RomPersistentData, minor_version), 60574, "minor_version"),
-            (offset_of!(RomPersistentData, marker), 60576, "marker"),
+            (offset_of!(RomPersistentData, fht), 37376, "fht"),
+            (offset_of!(RomPersistentData, idevid_mldsa_pub_key), 39424, "idevid_mldsa_pub_key"),
+            (offset_of!(RomPersistentData, ecc_ldevid_tbs), 42496, "ecc_ldevid_tbs"),
+            (offset_of!(RomPersistentData, ecc_fmcalias_tbs), 43092, "ecc_fmcalias_tbs"),
+            (offset_of!(RomPersistentData, mldsa_ldevid_tbs), 44012, "mldsa_ldevid_tbs"),
+            (offset_of!(RomPersistentData, mldsa_fmcalias_tbs), 47104, "mldsa_fmcalias_tbs"),
+            (offset_of!(RomPersistentData, pcr_log), 54196, "pcr_log"),
+            (offset_of!(RomPersistentData, measurement_log), 55220, "measurement_log"),
+            (offset_of!(RomPersistentData, fuse_log), 56244, "fuse_log"),
+            (offset_of!(RomPersistentData, idevid_csr_envelop), 57268, "idevid_csr_envelop"),
+            (offset_of!(RomPersistentData, cmb_aes_key_share0), 66052, "cmb_aes_key_share0"),
+            (offset_of!(RomPersistentData, cmb_aes_key_share1), 66084, "cmb_aes_key_share1"),
+            (offset_of!(RomPersistentData, dot_owner_pk_hash), 66116, "dot_owner_pk_hash"),
+            (offset_of!(RomPersistentData, cleared_non_fatal_fw_error), 66168, "cleared_non_fatal_fw_error"),
+            (offset_of!(RomPersistentData, ocp_lock_metadata), 66172, "ocp_lock_metadata"),
+            (offset_of!(RomPersistentData, entropy_cfg), 66180, "entropy_cfg"),
+            (offset_of!(RomPersistentData, boot_mode), 66204, "boot_mode"),
+            (offset_of!(RomPersistentData, major_version), 66208, "major_version"),
+            (offset_of!(RomPersistentData, minor_version), 66210, "minor_version"),
+            (offset_of!(RomPersistentData, marker), 66212, "marker"),
         ];
 
         for (actual, expected, name) in actual_expected {

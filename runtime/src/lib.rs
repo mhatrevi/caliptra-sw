@@ -84,7 +84,7 @@ pub use activate_firmware::ActivateFirmwareCmd;
 pub use authorize_and_stash::{IMAGE_AUTHORIZED, IMAGE_HASH_MISMATCH, IMAGE_NOT_AUTHORIZED};
 pub use caliptra_common::fips::FipsVersionCmd;
 use caliptra_common::mailbox_api::{populate_checksum, FipsVersionResp, MAX_RESP_SIZE};
-pub use dice::{GetFmcAliasCertCmd, GetLdevCertCmd, IDevIdCertCmd};
+pub use dice::{GetFmcAliasCertCmd, GetLdevCertCmd, GetPcrSigningCertCmd, IDevIdCertCmd};
 pub use disable::DisableAttestationCmd;
 pub use dpe_platform::{DpePlatform, VENDOR_ID, VENDOR_SKU};
 pub use fips::FipsShutdownCmd;
@@ -368,6 +368,12 @@ fn execute_command(
         }
         CommandId::GET_RT_ALIAS_MLDSA87_CERT => {
             GetRtAliasCertCmd::execute(drivers, AlgorithmType::Mldsa87, resp)
+        }
+        CommandId::GET_PCR_SIGNING_ECC384_CERT => {
+            GetPcrSigningCertCmd::execute(drivers, AlgorithmType::Ecc384, resp)
+        }
+        CommandId::GET_PCR_SIGNING_MLDSA87_CERT => {
+            GetPcrSigningCertCmd::execute(drivers, AlgorithmType::Mldsa87, resp)
         }
         CommandId::ADD_SUBJECT_ALT_NAME => AddSubjectAltNameCmd::execute(drivers, cmd_bytes),
         CommandId::CERTIFY_KEY_EXTENDED_ECC384 => {

@@ -93,6 +93,8 @@ fn test_cold_reset_status_reporting() {
         hw.step_until_boot_status(FmcAliasKeyPairDerivationComplete.into(), false);
         hw.step_until_boot_status(FmcAliasSubjIdSnGenerationComplete.into(), false);
         hw.step_until_boot_status(FmcAliasSubjKeyIdGenerationComplete.into(), false);
+        hw.step_until_boot_status(PcrSigningKeyPairDerivationComplete.into(), false);
+        hw.step_until_boot_status(PcrSigningCertComplete.into(), false);
         hw.step_until_boot_status(FmcAliasCertSigGenerationComplete.into(), false);
         hw.step_until_boot_status(FmcAliasDerivationComplete.into(), false);
         hw.step_until_boot_status(ColdResetComplete.into(), false);

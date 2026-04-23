@@ -40,6 +40,8 @@ pub enum TbsType {
     EccFmcalias = 1,
     MldsaLdevid = 2,
     MldsaFmcalias = 3,
+    EccPcrSigning = 4,
+    MldsaPcrSigning = 5,
 }
 /// Cold Reset Flow
 pub struct ColdResetFlow {}
@@ -162,6 +164,22 @@ pub fn copy_tbs(tbs: &[u8], tbs_type: TbsType, env: &mut RomEnv) -> CaliptraResu
             persistent_data
                 .rom
                 .mldsa_fmcalias_tbs
+                .get_mut(..tbs.len())
+                .ok_or(CaliptraError::ROM_GLOBAL_UNSUPPORTED_FMCALIAS_TBS_SIZE)?
+        }
+        TbsType::EccPcrSigning => {
+            persistent_data.rom.fht.ecc_pcr_signing_tbs_size = tbs.len() as u16;
+            persistent_data
+                .rom
+                .ecc_pcr_signing_tbs
+                .get_mut(..tbs.len())
+                .ok_or(CaliptraError::ROM_GLOBAL_UNSUPPORTED_FMCALIAS_TBS_SIZE)?
+        }
+        TbsType::MldsaPcrSigning => {
+            persistent_data.rom.fht.mldsa_pcr_signing_tbs_size = tbs.len() as u16;
+            persistent_data
+                .rom
+                .mldsa_pcr_signing_tbs
                 .get_mut(..tbs.len())
                 .ok_or(CaliptraError::ROM_GLOBAL_UNSUPPORTED_FMCALIAS_TBS_SIZE)?
         }

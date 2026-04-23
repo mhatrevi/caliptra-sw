@@ -27,6 +27,8 @@ pub struct ColdResetEntries {
     fmc_ecc_pk: Ecc384PubKey,
     fmc_dice_mldsa_sig: Mldsa87Signature,
     fmc_mldsa_pk: Mldsa87PubKey,
+    pcr_signing_ecc_sig: Ecc384Signature,
+    pcr_signing_mldsa_sig: Mldsa87Signature,
     fmc_tci: Array4x12,
     owner_pk_hash: Array4x12,
     cold_boot_fw_svn: u32,
@@ -200,6 +202,26 @@ impl DataVault {
     ///
     pub fn fmc_mldsa_pub_key(&self) -> Mldsa87PubKey {
         self.cold_reset_entries.fmc_mldsa_pk
+    }
+
+    /// Set the PCR signing ECC signature.
+    pub fn set_pcr_signing_ecc_signature(&mut self, sig: &Ecc384Signature) {
+        self.cold_reset_entries.pcr_signing_ecc_sig = *sig;
+    }
+
+    /// Get the PCR signing ECC signature.
+    pub fn pcr_signing_ecc_signature(&self) -> Ecc384Signature {
+        self.cold_reset_entries.pcr_signing_ecc_sig
+    }
+
+    /// Set the PCR signing MLDSA signature.
+    pub fn set_pcr_signing_mldsa_signature(&mut self, sig: &Mldsa87Signature) {
+        self.cold_reset_entries.pcr_signing_mldsa_sig = *sig;
+    }
+
+    /// Get the PCR signing MLDSA signature.
+    pub fn pcr_signing_mldsa_signature(&self) -> Mldsa87Signature {
+        self.cold_reset_entries.pcr_signing_mldsa_sig
     }
 
     /// Set the fmc tcb component identifier.

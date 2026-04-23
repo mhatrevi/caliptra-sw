@@ -24,7 +24,9 @@ use caliptra_cfi_lib::{cfi_assert, cfi_assert_bool, cfi_launder};
 use caliptra_common::cfi_check;
 use caliptra_common::crypto::{Crypto, Ecc384KeyPair, MlDsaKeyPair, PubKey};
 use caliptra_common::keyids::{
-    KEY_ID_FMC_ECDSA_PRIV_KEY, KEY_ID_FMC_MLDSA_KEYPAIR_SEED, KEY_ID_ROM_FMC_CDI,
+    KEY_ID_FMC_ECDSA_PRIV_KEY, KEY_ID_FMC_MLDSA_KEYPAIR_SEED, KEY_ID_LDEVID_ECDSA_PRIV_KEY,
+    KEY_ID_LDEVID_MLDSA_KEYPAIR_SEED, KEY_ID_PCR_QUOTE_ECDSA_PRIV_KEY, KEY_ID_PCR_QUOTE_MLDSA_KEYPAIR_SEED,
+    KEY_ID_ROM_FMC_CDI,
 };
 use caliptra_common::pcr::PCR_ID_FMC_CURRENT;
 use caliptra_common::RomBootStatus::*;
@@ -34,9 +36,18 @@ use caliptra_drivers::{
 };
 use caliptra_x509::{
     FmcAliasCertTbsEcc384, FmcAliasCertTbsEcc384Params, FmcAliasCertTbsMlDsa87,
-    FmcAliasCertTbsMlDsa87Params,
+    FmcAliasCertTbsMlDsa87Params, PcrSigningCertTbsEcc384, PcrSigningCertTbsEcc384Params,
+    PcrSigningCertTbsMlDsa87, PcrSigningCertTbsMlDsa87Params,
 };
 use zeroize::Zeroize;
+
+/// KDF labels for FMC Alias key derivation.
+const FMC_ALIAS_ECC_KEY_LABEL: &[u8] = b"alias_fmc_ecc_key";
+const FMC_ALIAS_MLDSA_KEY_LABEL: &[u8] = b"alias_fmc_mldsa_key";
+
+/// KDF labels for PCR Signing key derivation.
+const PCR_SIGNING_ECC_KEY_LABEL: &[u8] = b"pcr_signing_ecc_key";
+const PCR_SIGNING_MLDSA_KEY_LABEL: &[u8] = b"pcr_signing_mldsa_key";
 
 #[derive(Default)]
 pub struct FmcAliasLayer {}
@@ -65,7 +76,10 @@ impl FmcAliasLayer {
             KEY_ID_ROM_FMC_CDI,
             KEY_ID_FMC_ECDSA_PRIV_KEY,
             KEY_ID_FMC_MLDSA_KEYPAIR_SEED,
+            FMC_ALIAS_ECC_KEY_LABEL,
+            FMC_ALIAS_MLDSA_KEY_LABEL,
         )?;
+        report_boot_status(FmcAliasKeyPairDerivationComplete.into());
 
         // Generate the Subject Serial Number and Subject Key Identifier.
         //
@@ -92,7 +106,35 @@ impl FmcAliasLayer {
             mldsa_subj_key_id,
         };
 
-        // Generate FMC Alias Certificate
+        // Derive PCR Signing key pairs into KV7/KV8 (HW pcr_sign reads from
+        // these slots). This must happen BEFORE the FMC Alias cert generation
+        // because FMC Alias cert gen erases the LDevID private keys, which are
+        // needed to sign the PCR signing certs.
+        let (pcr_ecc_key_pair, pcr_mldsa_key_pair) = Self::derive_key_pair(
+            env,
+            KEY_ID_ROM_FMC_CDI,
+            KEY_ID_PCR_QUOTE_ECDSA_PRIV_KEY,
+            KEY_ID_PCR_QUOTE_MLDSA_KEYPAIR_SEED,
+            PCR_SIGNING_ECC_KEY_LABEL,
+            PCR_SIGNING_MLDSA_KEY_LABEL,
+        )?;
+        report_boot_status(PcrSigningKeyPairDerivationComplete.into());
+
+        // Generate PCR Signing Certificate (leaf cert signed by LDevID).
+        // Must happen before FMC Alias cert gen which erases LDevID keys.
+        Self::generate_pcr_signing_cert_ecc(env, &pcr_ecc_key_pair, fw_proc_info)?;
+        Self::generate_pcr_signing_cert_mldsa(env, &pcr_mldsa_key_pair, fw_proc_info)?;
+        report_boot_status(PcrSigningCertComplete.into());
+
+        // Write-lock the PCR signing key slots. The write() call sets lock_wr=1
+        // and clears all other KEY_CTRL bits (including dest_valid/usage),
+        // ensuring that only the HW pcr_sign direct-wire path can read these
+        // keys — no software crypto operation can use them.
+        env.key_vault.set_key_write_lock(KEY_ID_PCR_QUOTE_ECDSA_PRIV_KEY);
+        env.key_vault
+            .set_key_write_lock(KEY_ID_PCR_QUOTE_MLDSA_KEYPAIR_SEED);
+
+        // Generate FMC Alias Certificate (this erases LDevID private keys)
         let result: CaliptraResult<()> = (|| {
             Self::generate_cert_sig_ecc(env, input, &output, fw_proc_info)?;
             Self::generate_cert_sig_mldsa(env, input, &output, fw_proc_info)?;
@@ -145,16 +187,20 @@ impl FmcAliasLayer {
     /// * `cdi`      - Composite Device Identity
     /// * `ecc_priv_key` - Key slot to store the ECC private key into
     /// * `mldsa_keypair_seed` - Key slot to store the MLDSA key pair seed
+    /// * `ecc_label` - Label for ECC key derivation
+    /// * `mldsa_label` - Label for MLDSA key derivation
     ///
     /// # Returns
     ///
-    /// * `Ecc384KeyPair` - Derive DICE Layer Key Pair
+    /// * `(Ecc384KeyPair, MlDsaKeyPair)` - Derived key pairs
     #[cfg_attr(feature = "cfi", cfi_impl_fn)]
     fn derive_key_pair(
         env: &mut RomEnv,
         cdi: KeyId,
         ecc_priv_key: KeyId,
         mldsa_keypair_seed: KeyId,
+        ecc_label: &[u8],
+        mldsa_label: &[u8],
     ) -> CaliptraResult<(Ecc384KeyPair, MlDsaKeyPair)> {
         let result = Crypto::ecc384_key_gen(
             &mut env.ecc384,
@@ -162,7 +208,7 @@ impl FmcAliasLayer {
             &mut env.trng,
             &mut env.key_vault,
             cdi,
-            b"alias_fmc_ecc_key",
+            ecc_label,
             ecc_priv_key,
         );
         cfi_check!(result);
@@ -175,14 +221,13 @@ impl FmcAliasLayer {
                 &mut env.hmac,
                 &mut env.trng,
                 cdi,
-                b"alias_fmc_mldsa_key",
+                mldsa_label,
                 mldsa_keypair_seed,
             )
         });
         cfi_check!(result);
         let mldsa_keypair = result?;
 
-        report_boot_status(FmcAliasKeyPairDerivationComplete.into());
         Ok((ecc_keypair, mldsa_keypair))
     }
 
@@ -349,6 +394,122 @@ impl FmcAliasLayer {
         copy_tbs(tbs.tbs(), TbsType::MldsaFmcalias, env)?;
 
         report_boot_status(FmcAliasCertSigGenerationComplete.into());
+        Ok(())
+    }
+
+    /// Generate PCR Signing ECC Certificate
+    ///
+    /// Leaf cert (CA=false, digitalSignature) signed by LDevID ECC key.
+    fn generate_pcr_signing_cert_ecc(
+        env: &mut RomEnv,
+        pcr_key_pair: &Ecc384KeyPair,
+        fw_proc_info: &FwProcInfo,
+    ) -> CaliptraResult<()> {
+        let pub_key = &pcr_key_pair.pub_key;
+        let soc_ifc = &env.soc_ifc;
+
+        // The LDevID ECC key is the issuer (authority).
+        let data_vault = &env.persistent_data.get().rom.data_vault;
+        let auth_pub_key = data_vault.ldev_dice_ecc_pub_key();
+        let ldev_ecc_subj_sn = x509::subj_sn(&mut env.sha256, &PubKey::Ecc(&auth_pub_key))?;
+        let ldev_ecc_subj_key_id = x509::subj_key_id(&mut env.sha256, &PubKey::Ecc(&auth_pub_key))?;
+
+        let params = PcrSigningCertTbsEcc384Params {
+            ueid: &x509::ueid(soc_ifc)?,
+            subject_sn: &x509::subj_sn(&mut env.sha256, &PubKey::Ecc(pub_key))?,
+            subject_key_id: &x509::subj_key_id(&mut env.sha256, &PubKey::Ecc(pub_key))?,
+            issuer_sn: &ldev_ecc_subj_sn,
+            authority_key_id: &ldev_ecc_subj_key_id,
+            serial_number: &x509::ecc_cert_sn(&mut env.sha256, pub_key)?,
+            public_key: &pub_key.to_der(),
+            not_before: &fw_proc_info.fmc_cert_valid_not_before.value,
+            not_after: &fw_proc_info.fmc_cert_valid_not_after.value,
+        };
+
+        let tbs = PcrSigningCertTbsEcc384::new(&params);
+
+        // Sign with LDevID ECC key (KV5)
+        cprintln!(
+            "[afmc] ECC Signing PCR cert w/ AUTHORITY.KEYID = {}",
+            KEY_ID_LDEVID_ECDSA_PRIV_KEY as u8
+        );
+        let mut sig = Crypto::ecdsa384_sign_and_verify(
+            &mut env.sha2_512_384,
+            &mut env.ecc384,
+            &mut env.trng,
+            KEY_ID_LDEVID_ECDSA_PRIV_KEY,
+            &auth_pub_key,
+            tbs.tbs(),
+        );
+        let sig = okmutref(&mut sig)?;
+
+        // Store the PCR signing ECC cert signature in data vault.
+        let data_vault = &mut env.persistent_data.get_mut().rom.data_vault;
+        data_vault.set_pcr_signing_ecc_signature(sig);
+        sig.zeroize();
+
+        // Copy TBS to DCCM
+        copy_tbs(tbs.tbs(), TbsType::EccPcrSigning, env)?;
+
+        Ok(())
+    }
+
+    /// Generate PCR Signing MLDSA Certificate
+    ///
+    /// Leaf cert (CA=false, digitalSignature) signed by LDevID MLDSA key.
+    fn generate_pcr_signing_cert_mldsa(
+        env: &mut RomEnv,
+        pcr_key_pair: &MlDsaKeyPair,
+        fw_proc_info: &FwProcInfo,
+    ) -> CaliptraResult<()> {
+        let pub_key = pcr_key_pair.pub_key;
+        let soc_ifc = &env.soc_ifc;
+
+        // The LDevID MLDSA key is the issuer (authority).
+        let data_vault = &env.persistent_data.get().rom.data_vault;
+        let auth_pub_key = data_vault.ldev_dice_mldsa_pub_key();
+        let ldev_mldsa_subj_sn = x509::subj_sn(&mut env.sha256, &PubKey::Mldsa(&auth_pub_key))?;
+        let ldev_mldsa_subj_key_id =
+            x509::subj_key_id(&mut env.sha256, &PubKey::Mldsa(&auth_pub_key))?;
+
+        let params = PcrSigningCertTbsMlDsa87Params {
+            ueid: &x509::ueid(soc_ifc)?,
+            subject_sn: &x509::subj_sn(&mut env.sha256, &PubKey::Mldsa(&pub_key))?,
+            subject_key_id: &x509::subj_key_id(&mut env.sha256, &PubKey::Mldsa(&pub_key))?,
+            issuer_sn: &ldev_mldsa_subj_sn,
+            authority_key_id: &ldev_mldsa_subj_key_id,
+            serial_number: &x509::mldsa_cert_sn(&mut env.sha256, &pub_key)?,
+            public_key: &pub_key.into(),
+            not_before: &fw_proc_info.fmc_cert_valid_not_before.value,
+            not_after: &fw_proc_info.fmc_cert_valid_not_after.value,
+        };
+
+        let tbs = PcrSigningCertTbsMlDsa87::new(&params);
+
+        // Sign with LDevID MLDSA key (KV4)
+        cprintln!(
+            "[afmc] MLDSA Signing PCR cert w/ AUTHORITY.KEYID = {}",
+            KEY_ID_LDEVID_MLDSA_KEYPAIR_SEED as u8
+        );
+        let mut sig = env.abr.with_mldsa87(|mut mldsa87| {
+            Crypto::mldsa87_sign_and_verify(
+                &mut mldsa87,
+                &mut env.trng,
+                KEY_ID_LDEVID_MLDSA_KEYPAIR_SEED,
+                &auth_pub_key,
+                tbs.tbs(),
+            )
+        });
+        let sig = okmutref(&mut sig)?;
+
+        // Store the PCR signing MLDSA cert signature in data vault.
+        let data_vault = &mut env.persistent_data.get_mut().rom.data_vault;
+        data_vault.set_pcr_signing_mldsa_signature(sig);
+        sig.zeroize();
+
+        // Copy TBS to DCCM
+        copy_tbs(tbs.tbs(), TbsType::MldsaPcrSigning, env)?;
+
         Ok(())
     }
 }

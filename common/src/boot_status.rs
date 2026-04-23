@@ -60,8 +60,10 @@ pub enum RomBootStatus {
     FmcAliasKeyPairDerivationComplete = FMCALIAS_BOOT_STATUS_BASE + 1,
     FmcAliasSubjIdSnGenerationComplete = FMCALIAS_BOOT_STATUS_BASE + 2,
     FmcAliasSubjKeyIdGenerationComplete = FMCALIAS_BOOT_STATUS_BASE + 3,
-    FmcAliasCertSigGenerationComplete = FMCALIAS_BOOT_STATUS_BASE + 4,
-    FmcAliasDerivationComplete = FMCALIAS_BOOT_STATUS_BASE + 5,
+    PcrSigningKeyPairDerivationComplete = FMCALIAS_BOOT_STATUS_BASE + 4,
+    PcrSigningCertComplete = FMCALIAS_BOOT_STATUS_BASE + 5,
+    FmcAliasCertSigGenerationComplete = FMCALIAS_BOOT_STATUS_BASE + 6,
+    FmcAliasDerivationComplete = FMCALIAS_BOOT_STATUS_BASE + 7,
 
     // Cold Reset Statuses
     ColdResetStarted = COLD_RESET_BOOT_STATUS_BASE,

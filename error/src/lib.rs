@@ -1314,6 +1314,11 @@ impl CaliptraError {
             "Runtime Error: Get RT alias cert failed"
         ),
         (
+            RUNTIME_GET_PCR_SIGNING_CERT_FAILED,
+            0x000E0097,
+            "Runtime Error: Get PCR signing cert failed"
+        ),
+        (
             RUNTIME_CMD_BUSY_DURING_WARM_RESET,
             0x000E002B,
             "Runtime Error: Command busy during warm reset"

@@ -34,6 +34,8 @@ const FMC_ALIAS_ECC384: &str = "Caliptra 2.1 Ecc384 FMC Alias";
 const FMC_ALIAS_MLDSA87: &str = "Caliptra 2.1 MlDsa87 FMC Alias";
 const RT_ALIAS_ECC384: &str = "Caliptra 2.1 Ecc384 Rt Alias";
 const RT_ALIAS_MLDSA87: &str = "Caliptra 2.1 MlDsa87 Rt Alias";
+const PCR_SIGNING_ECC384: &str = "Caliptra 2.1 Ecc384 PCR Signing";
+const PCR_SIGNING_MLDSA87: &str = "Caliptra 2.1 MlDsa87 PCR Signing";
 
 fn main() {
     let manifest_dir =
@@ -51,6 +53,7 @@ fn main() {
     gen_fmc_alias_cert(build_dir);
     gen_rt_alias_cert(build_dir);
     gen_rt_alias_csr(build_dir);
+    gen_pcr_signing_cert(build_dir);
     gen_ocp_lock_endorsement_cert(build_dir);
     gen_ocp_lock_hybrid_endorsement_cert(build_dir, src_dir);
 
@@ -344,6 +347,32 @@ fn gen_rt_alias_csr(out_dir: &str) {
         }]);
     let template = bldr.tbs_template(RT_ALIAS_MLDSA87);
     CodeGen::gen_code("RtAliasCsrTbsMlDsa87", template, out_dir);
+}
+
+/// Generate PCR Signing Certificate Templates
+///
+/// This is a leaf certificate (CA=false) with digitalSignature keyUsage only,
+/// issued by the LDevID CA. The PCR signing key in KV7/KV8 is used by HW
+/// pcr_sign mode to sign PCR quotes. See chipsalliance/caliptra-sw#3645.
+fn gen_pcr_signing_cert(out_dir: &str) {
+    let mut usage = KeyUsage::default();
+    usage.set_digital_signature(true);
+
+    let bldr = cert::CertTemplateBuilder::<EcdsaSha384Algo, EcdsaSha384Algo>::new()
+        .add_basic_constraints_ext(false, 0)
+        .add_key_usage_ext(usage)
+        .add_ueid_ext(&[0xFF; 17])
+        .add_extended_key_usage_ext(&[x509::TCG_DICE_KP_ATTEST_LOC]);
+    let template = bldr.tbs_template(PCR_SIGNING_ECC384, LDEVID_ECC384);
+    CodeGen::gen_code("PcrSigningCertTbsEcc384", template, out_dir);
+
+    let bldr = cert::CertTemplateBuilder::<MlDsa87Algo, MlDsa87Algo>::new()
+        .add_basic_constraints_ext(false, 0)
+        .add_key_usage_ext(usage)
+        .add_ueid_ext(&[0xFF; 17])
+        .add_extended_key_usage_ext(&[x509::TCG_DICE_KP_ATTEST_LOC]);
+    let template = bldr.tbs_template(PCR_SIGNING_MLDSA87, LDEVID_MLDSA87);
+    CodeGen::gen_code("PcrSigningCertTbsMlDsa87", template, out_dir);
 }
 
 /// Generate OCP LOCK HPKE Endorsement Certificate Templates
