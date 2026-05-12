@@ -52,6 +52,7 @@ struct OtpCtrlConfig {
     fuse_controller_base_addr: u64,
     seed_config: SeedConfig,
     dai_idle_bit_num: u32,
+    status_reg_addr: u64,
     direct_access_cmd_reg_addr: u64,
     direct_access_address_reg_addr: u64,
     direct_access_wdata_0_reg_addr: u64,
@@ -67,6 +68,7 @@ impl UdsFeProgrammingFlow {
         let fuse_controller_base_addr = soc_ifc.fuse_controller_base_addr();
         let seed_config = self.get_seed_config(soc_ifc);
         let dai_idle_bit_num = soc_ifc.otp_dai_idle_bit_num();
+        let status_reg_addr = fuse_controller_base_addr + soc_ifc.otp_status_reg_offset() as u64;
         let direct_access_cmd_reg_addr =
             fuse_controller_base_addr + soc_ifc.otp_direct_access_cmd_reg_offset() as u64;
         let direct_access_address_reg_addr =
@@ -85,6 +87,7 @@ impl UdsFeProgrammingFlow {
             fuse_controller_base_addr,
             seed_config,
             dai_idle_bit_num,
+            status_reg_addr,
             direct_access_cmd_reg_addr,
             direct_access_address_reg_addr,
             direct_access_wdata_0_reg_addr,
@@ -212,10 +215,10 @@ impl UdsFeProgrammingFlow {
             let config = self.init_otp_config(soc_ifc);
             let otp_ctrl = DmaOtpCtrl::new(AxiAddr::from(config.fuse_controller_base_addr), dma);
 
-            let _ = otp_ctrl.with_regs_mut(|regs| {
+            let _ = otp_ctrl.with_regs_mut(|_regs| {
                 // Helper function to check if DAI is idle using the configurable bit number
                 let is_dai_idle = || -> bool {
-                    let status: u32 = regs.status().read().into();
+                    let status = dma.read_dword(AxiAddr::from(config.status_reg_addr));
                     (status & (1 << config.dai_idle_bit_num)) != 0
                 };
 
@@ -325,10 +328,10 @@ impl UdsFeProgrammingFlow {
             4
         };
 
-        let _ = otp_ctrl.with_regs_mut(|regs| {
+        let _ = otp_ctrl.with_regs_mut(|_regs| {
             // Helper to wait for DAI idle state
             let wait_dai_idle = || loop {
-                let status: u32 = regs.status().read().into();
+                let status = dma.read_dword(AxiAddr::from(config.status_reg_addr));
                 if (status & (1 << config.dai_idle_bit_num)) != 0 {
                     break;
                 }
