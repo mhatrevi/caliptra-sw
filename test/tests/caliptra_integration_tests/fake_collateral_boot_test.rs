@@ -16,7 +16,7 @@ use caliptra_builder::{
     },
     ImageOptions,
 };
-use caliptra_hw_model::{BootParams, DeviceLifecycle, HwModel, InitParams, SecurityState};
+use caliptra_hw_model::{BootParams, DeviceLifecycle, HwModel, InitParams, ModelError, SecurityState};
 use caliptra_image_types::FwVerificationPqcKeyType;
 use caliptra_test::{
     default_soc_manifest_bytes,
@@ -55,6 +55,36 @@ fn assert_output_contains(haystack: &str, needle: &str) {
         haystack.contains(needle),
         "Expected substring in output not found: {needle}"
     );
+}
+
+fn mailbox_execute_req_with_lock_retry<H, R, F>(
+    hw: &mut H,
+    mut make_req: F,
+) -> Result<R::Resp, ModelError>
+where
+    H: HwModel,
+    R: caliptra_api::mailbox::Request,
+    F: FnMut() -> R,
+{
+    // On the FPGA subsystem profile, another agent (for example the MCU ROM
+    // finishing post-runtime work) can briefly hold the mailbox lock after RT
+    // announces that it is ready for commands. Step the model and retry instead
+    // of treating that transient lock contention as a test failure.
+    const MAX_ATTEMPTS: u32 = 100;
+    const STEPS_PER_ATTEMPT: u32 = 1000;
+
+    for _ in 0..MAX_ATTEMPTS {
+        match hw.mailbox_execute_req(make_req()) {
+            Err(ModelError::UnableToLockMailbox) => {
+                for _ in 0..STEPS_PER_ATTEMPT {
+                    hw.step();
+                }
+            }
+            other => return other,
+        }
+    }
+
+    Err(ModelError::UnableToLockMailbox)
 }
 
 fn get_idevid_pubkey_ecc() -> openssl::pkey::PKey<openssl::pkey::Public> {
@@ -146,12 +176,16 @@ fn fake_boot_test() {
             assert_output_contains(&output, "Caliptra RT");
 
             let ldev_cert_resp = match algorithm_type {
-                AlgorithmType::Ecc384 => hw
-                    .mailbox_execute_req(GetLdevEcc384CertReq::default())
-                    .unwrap(),
-                AlgorithmType::Mldsa87 => hw
-                    .mailbox_execute_req(GetLdevMldsa87CertReq::default())
-                    .unwrap(),
+                AlgorithmType::Ecc384 => mailbox_execute_req_with_lock_retry(
+                    &mut hw,
+                    GetLdevEcc384CertReq::default,
+                )
+                .unwrap(),
+                AlgorithmType::Mldsa87 => mailbox_execute_req_with_lock_retry(
+                    &mut hw,
+                    GetLdevMldsa87CertReq::default,
+                )
+                .unwrap(),
             };
 
             // Extract the certificate from the response
@@ -220,12 +254,16 @@ fn fake_boot_test() {
             println!("ldev-cert: {}", ldev_cert_txt);
 
             let fmc_alias_cert_resp = match algorithm_type {
-                AlgorithmType::Ecc384 => hw
-                    .mailbox_execute_req(GetFmcAliasEcc384CertReq::default())
-                    .unwrap(),
-                AlgorithmType::Mldsa87 => hw
-                    .mailbox_execute_req(GetFmcAliasMlDsa87CertReq::default())
-                    .unwrap(),
+                AlgorithmType::Ecc384 => mailbox_execute_req_with_lock_retry(
+                    &mut hw,
+                    GetFmcAliasEcc384CertReq::default,
+                )
+                .unwrap(),
+                AlgorithmType::Mldsa87 => mailbox_execute_req_with_lock_retry(
+                    &mut hw,
+                    GetFmcAliasMlDsa87CertReq::default,
+                )
+                .unwrap(),
             };
 
             // Extract the certificate from the response
