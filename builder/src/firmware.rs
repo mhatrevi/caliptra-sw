@@ -362,6 +362,11 @@ pub mod driver_tests {
         ..BASE_FWID
     };
 
+    pub const ACVP_TEST_HARNESS: FwId = FwId {
+        bin_name: "acvp_test_harness",
+        ..BASE_FWID
+    };
+
     pub const MAILBOX_DRIVER_SENDER: FwId = FwId {
         bin_name: "mailbox_driver_sender",
         ..BASE_FWID
@@ -781,6 +786,7 @@ pub const REGISTERED_FW: &[&FwId] = &[
     &driver_tests::KEYVAULT,
     &driver_tests::KEYVAULT_FPGA,
     &driver_tests::MAILBOX_DRIVER_RESPONDER,
+    &driver_tests::ACVP_TEST_HARNESS,
     &driver_tests::MAILBOX_DRIVER_SENDER,
     &driver_tests::MAILBOX_DRIVER_NEGATIVE_TESTS,
     &driver_tests::MAILBOX_DRIVER_DATA_READY,

@@ -98,6 +98,11 @@ path = "src/bin/mailbox_driver_responder.rs"
 required-features = ["riscv"]
 
 [[bin]]
+name = "acvp_test_harness"
+path = "src/bin/acvp_test_harness.rs"
+required-features = ["riscv"]
+
+[[bin]]
 name = "mailbox_driver_sender"
 path = "src/bin/mailbox_driver_sender.rs"
 required-features = ["riscv"]

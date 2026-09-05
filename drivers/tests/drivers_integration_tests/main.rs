@@ -7,7 +7,8 @@ use std::iter;
 use caliptra_builder::{firmware, FwId};
 use caliptra_drivers::{Array4x12, Array4xN, Ecc384PubKey};
 use caliptra_drivers_test_bin::{
-    DoeTestResults, OCP_LOCK_WARM_RESET_MAGIC_BOOT_STATUS, PLAINTEXT_MEK,
+    AcvpCapabilitiesResp, DoeTestResults, ACVP_CMD_GET_CAPABILITIES, ACVP_MAX_DATA_SIZE,
+    ACVP_PROTOCOL_VERSION, OCP_LOCK_WARM_RESET_MAGIC_BOOT_STATUS, PLAINTEXT_MEK,
 };
 use caliptra_hw_model::{
     BootParams, CodeRange, DefaultHwModel, DeviceLifecycle, Fuses, HwModel, ImageInfo, InitParams,
@@ -409,6 +410,20 @@ fn test_keyvault() {
             &firmware::driver_tests::KEYVAULT
         },
     );
+}
+
+#[test]
+fn test_acvp_harness_capabilities() {
+    let mut model = start_driver_test(&firmware::driver_tests::ACVP_TEST_HARNESS).unwrap();
+    let response = model
+        .mailbox_execute(ACVP_CMD_GET_CAPABILITIES, &[])
+        .unwrap()
+        .expect("ACVP capabilities response");
+    let capabilities = AcvpCapabilitiesResp::read_from_bytes(&response).unwrap();
+
+    assert_eq!(capabilities.protocol_version, ACVP_PROTOCOL_VERSION);
+    assert_eq!(capabilities.supported_algorithms, 0);
+    assert_eq!(capabilities.max_data_size, ACVP_MAX_DATA_SIZE);
 }
 
 #[test]

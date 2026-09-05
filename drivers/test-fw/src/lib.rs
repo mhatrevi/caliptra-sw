@@ -21,6 +21,18 @@ use core::fmt::Debug;
 use itertools::Itertools;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
+pub const ACVP_CMD_GET_CAPABILITIES: u32 = u32::from_be_bytes(*b"AVCA");
+pub const ACVP_PROTOCOL_VERSION: u32 = 1;
+pub const ACVP_MAX_DATA_SIZE: u32 = 4096;
+
+#[repr(C)]
+#[derive(Debug, IntoBytes, FromBytes, Immutable, KnownLayout, PartialEq, Eq)]
+pub struct AcvpCapabilitiesResp {
+    pub protocol_version: u32,
+    pub supported_algorithms: u32,
+    pub max_data_size: u32,
+}
+
 pub const DOE_TEST_IV: [u32; 4] = [0xc6b407a2, 0xd119a37d, 0xb7a5bdeb, 0x26214aed];
 
 pub const DOE_TEST_HMAC_KEY: [u32; 12] = [
