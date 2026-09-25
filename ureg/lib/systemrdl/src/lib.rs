@@ -26,7 +26,7 @@ fn unpad_description(desc: &str) -> String {
     let mut lines = vec![];
     for l in desc.lines() {
         let trim_start = usize::min(ltrim, l.find(|c| c != ' ').unwrap_or(0));
-        lines.push(&l[trim_start..]);
+        lines.push(l[trim_start..].trim_end());
     }
     while let Some(line) = lines.last() {
         if !line.trim().is_empty() {
@@ -469,6 +469,15 @@ pub fn translate_addrmap(addrmap: systemrdl::ParentScope) -> Result<Vec<Register
 #[cfg(test)]
 mod next_multiple_of_tests {
     use super::*;
+
+    #[test]
+    fn test_unpad_description_trims_trailing_whitespace() {
+        assert_eq!(
+            "First line\nSecond line",
+            unpad_description("First line  \n    Second line\t\n    ")
+        );
+    }
+
     #[test]
     fn test_next_multiple_of() {
         assert_eq!(0, next_multiple_of(0, 3));

@@ -16,3 +16,17 @@ pub use caliptra_registers_rev_2_1::*;
 
 #[cfg(hw_rev = "2.0")]
 compile_error!("TODO: add v2.0 HW register definitions");
+
+#[cfg(hw_rev = "latest")]
+pub use soc_ifc::regs::{
+    EntropyConfig0ReadVal as CptraItrngEntropyConfig0ReadVal,
+    EntropyConfig0WriteVal as CptraItrngEntropyConfig0WriteVal,
+    EntropyConfig1ReadVal as CptraItrngEntropyConfig1ReadVal,
+    EntropyConfig1WriteVal as CptraItrngEntropyConfig1WriteVal,
+};
+
+#[cfg(hw_rev = "2.1")]
+pub use soc_ifc::regs::{
+    CptraItrngEntropyConfig0ReadVal, CptraItrngEntropyConfig0WriteVal,
+    CptraItrngEntropyConfig1ReadVal, CptraItrngEntropyConfig1WriteVal,
+};
