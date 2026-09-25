@@ -114,6 +114,11 @@ mod constants {
     pub const INTERNAL_NMI_VECTOR_START: u32 = 0x62c;
     pub const INTERNAL_RV_MTIME_L_START: u32 = 0x640;
     pub const INTERNAL_RV_MTIME_H_START: u32 = 0x644;
+    pub const INTERNAL_ICCM_FMC_START_ADDR_START: u32 = 0x650;
+    pub const INTERNAL_ICCM_FMC_END_ADDR_START: u32 = 0x654;
+    pub const INTERNAL_ICCM_RT_START_ADDR_START: u32 = 0x658;
+    pub const INTERNAL_ICCM_RT_END_ADDR_START: u32 = 0x65c;
+    pub const INTERNAL_ICCM_REGION_LOCK_START: u32 = 0x660;
     pub const STASH_DATA_START: u32 = 0xc00;
     pub const STASH_DATA_SIZE: usize = 0x340;
     pub const STASH_SOC_LOCK_START: u32 = 0xf40;
@@ -893,6 +898,25 @@ struct SocRegistersImpl {
     #[register(offset= 0x0644, read_fn = on_read_internal_rv_mtime_h)]
     internal_rv_mtime_h: ReadOnlyRegister<u32>,
 
+    /// ICCM boot-flow monitor region registers.
+    ///
+    /// The emulator currently stores these values so firmware can configure the
+    /// 2.2 register interface, but does not enforce the hardware boot-flow monitor.
+    #[register(offset = 0x0650)]
+    internal_iccm_fmc_start_addr: ReadWriteRegister<u32>,
+
+    #[register(offset = 0x0654)]
+    internal_iccm_fmc_end_addr: ReadWriteRegister<u32>,
+
+    #[register(offset = 0x0658)]
+    internal_iccm_rt_start_addr: ReadWriteRegister<u32>,
+
+    #[register(offset = 0x065c)]
+    internal_iccm_rt_end_addr: ReadWriteRegister<u32>,
+
+    #[register(offset = 0x0660)]
+    internal_iccm_region_lock: ReadWriteRegister<u32>,
+
     /// GLOBAL_INTR_EN_R Register
     #[register(offset = 0x0800)]
     global_intr_en_r: ReadWriteRegister<u32, GlobalIntrEn::Register>,
@@ -1132,6 +1156,11 @@ impl SocRegistersImpl {
             internal_nmi_vector: ReadWriteRegister::new(0),
             internal_rv_mtime_l: ReadOnlyRegister::new(0),
             internal_rv_mtime_h: ReadOnlyRegister::new(0),
+            internal_iccm_fmc_start_addr: ReadWriteRegister::new(0),
+            internal_iccm_fmc_end_addr: ReadWriteRegister::new(0),
+            internal_iccm_rt_start_addr: ReadWriteRegister::new(0),
+            internal_iccm_rt_end_addr: ReadWriteRegister::new(0),
+            internal_iccm_region_lock: ReadWriteRegister::new(0),
             global_intr_en_r: ReadWriteRegister::new(0),
             error_intr_en_r: ReadWriteRegister::new(0),
             notif_intr_en_r: ReadWriteRegister::new(0),
@@ -1658,6 +1687,12 @@ impl SocRegistersImpl {
         for reg in self.cptra_mbox_valid_axi_user.iter_mut() {
             *reg = 0xffffffff;
         }
+
+        self.internal_iccm_fmc_start_addr.reg.set(0);
+        self.internal_iccm_fmc_end_addr.reg.set(0);
+        self.internal_iccm_rt_start_addr.reg.set(0);
+        self.internal_iccm_rt_end_addr.reg.set(0);
+        self.internal_iccm_region_lock.reg.set(0);
 
         self.reset_common();
     }
@@ -2426,5 +2461,40 @@ mod tests {
         assert_eq!(result, Err(BusError::LoadAccessFault));
         let result = reg.write(RvSize::Word, STASH_DATA_START, 0xff);
         assert_eq!(result, Err(BusError::StoreAccessFault));
+    }
+
+    #[test]
+    fn test_iccm_region_registers_reset_behavior() {
+        let clock = Rc::new(Clock::new());
+        let mailbox = MailboxInternal::new(&clock, MailboxRam::default());
+        let args = CaliptraRootBusArgs {
+            hw_version: CaliptraHwVersion::V2_2,
+            clock: clock.clone(),
+            ..CaliptraRootBusArgs::default()
+        };
+        let mut regs =
+            SocRegistersInternal::new(mailbox, Iccm::new(&clock), Mci::new(vec![]), args);
+        let values = [
+            (INTERNAL_ICCM_FMC_START_ADDR_START, 0),
+            (INTERNAL_ICCM_FMC_END_ADDR_START, 0x7fff),
+            (INTERNAL_ICCM_RT_START_ADDR_START, 0x8000),
+            (INTERNAL_ICCM_RT_END_ADDR_START, 0x3c7ff),
+            (INTERNAL_ICCM_REGION_LOCK_START, 1),
+        ];
+
+        for (address, value) in values {
+            regs.write(RvSize::Word, address, value).unwrap();
+            assert_eq!(regs.read(RvSize::Word, address).unwrap(), value);
+        }
+
+        regs.update_reset();
+        for (address, value) in values {
+            assert_eq!(regs.read(RvSize::Word, address).unwrap(), value);
+        }
+
+        regs.warm_reset();
+        for (address, _) in values {
+            assert_eq!(regs.read(RvSize::Word, address).unwrap(), 0);
+        }
     }
 }

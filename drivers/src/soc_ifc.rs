@@ -249,6 +249,25 @@ impl SocIfc {
         soc_ifc_regs.internal_iccm_lock().modify(|w| w.lock(lock));
     }
 
+    /// Programs and locks the ICCM regions used for FMC and runtime handoffs.
+    ///
+    /// All addresses are relative to the start of ICCM and the end addresses are inclusive.
+    pub fn configure_iccm_regions(
+        &mut self,
+        fmc_start: u32,
+        fmc_end: u32,
+        runtime_start: u32,
+        runtime_end: u32,
+    ) {
+        caliptra_registers::configure_iccm_regions(
+            &mut self.soc_ifc,
+            fmc_start,
+            fmc_end,
+            runtime_start,
+            runtime_end,
+        );
+    }
+
     /// Retrieve reset reason
     pub fn reset_reason(&mut self) -> ResetReason {
         reset_reason()

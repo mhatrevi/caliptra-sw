@@ -34,6 +34,38 @@ pub use soc_ifc::regs::{
 /// Whether the selected hardware revision requires HMAC final-block signaling.
 pub const HMAC_LAST_BLOCK_SUPPORTED: bool = cfg!(hw_rev = "latest");
 
+/// Programs and locks the ICCM regions used by the hardware boot-flow monitor.
+#[inline(always)]
+pub fn configure_iccm_regions(
+    soc_ifc: &mut soc_ifc::SocIfcReg,
+    fmc_start: u32,
+    fmc_end: u32,
+    runtime_start: u32,
+    runtime_end: u32,
+) {
+    #[cfg(hw_rev = "latest")]
+    {
+        let regs = soc_ifc.regs_mut();
+
+        for _ in 0..2 {
+            regs.internal_iccm_fmc_start_addr()
+                .write(|w| w.addr(fmc_start));
+            regs.internal_iccm_fmc_end_addr().write(|w| w.addr(fmc_end));
+            regs.internal_iccm_rt_start_addr()
+                .write(|w| w.addr(runtime_start));
+            regs.internal_iccm_rt_end_addr()
+                .write(|w| w.addr(runtime_end));
+        }
+
+        regs.internal_iccm_region_lock().write(|w| w.lock(true));
+    }
+
+    #[cfg(hw_rev = "2.1")]
+    {
+        let _ = (soc_ifc, fmc_start, fmc_end, runtime_start, runtime_end);
+    }
+}
+
 /// Sets the HMAC final-block control bit when supported by the selected hardware revision.
 #[inline(always)]
 pub fn set_hmac_last_block(

@@ -18,9 +18,15 @@ use caliptra_cfi_derive::cfi_mod_fn;
 use caliptra_common::{
     lock_datavault_region,
     pcr::{PCR_ID_FMC_CURRENT, PCR_ID_FMC_JOURNEY, PCR_ID_STASH_MEASUREMENT},
+    FMC_ORG, FMC_SIZE, RUNTIME_ORG, RUNTIME_SIZE,
 };
-use caliptra_drivers::{ColdResetEntries, ResetReason, WarmResetEntries};
+use caliptra_drivers::{memory_layout::ICCM_ORG, ColdResetEntries, ResetReason, WarmResetEntries};
 use core::mem::size_of;
+
+const FMC_ICCM_START: u32 = FMC_ORG - ICCM_ORG;
+const FMC_ICCM_END: u32 = FMC_ICCM_START + FMC_SIZE - 1;
+const RUNTIME_ICCM_START: u32 = RUNTIME_ORG - ICCM_ORG;
+const RUNTIME_ICCM_END: u32 = RUNTIME_ICCM_START + RUNTIME_SIZE - 1;
 
 /// Lock registers
 ///
@@ -42,6 +48,16 @@ pub fn lock_registers(env: &mut RomEnv, reset_reason: ResetReason) {
     env.pcr_bank.set_pcr_lock(PCR_ID_FMC_CURRENT);
     env.pcr_bank.set_pcr_lock(PCR_ID_FMC_JOURNEY);
     env.pcr_bank.set_pcr_lock(PCR_ID_STASH_MEASUREMENT);
+
+    // ICCM region registers reset on cold and warm reset, but persist across update reset.
+    if reset_reason != ResetReason::UpdateReset {
+        env.soc_ifc.configure_iccm_regions(
+            FMC_ICCM_START,
+            FMC_ICCM_END,
+            RUNTIME_ICCM_START,
+            RUNTIME_ICCM_END,
+        );
+    }
 
     env.soc_ifc.set_iccm_lock(true);
 }
