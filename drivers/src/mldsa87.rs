@@ -116,9 +116,32 @@ impl<'a> Mldsa87<'a> {
         Self { mldsa87 }
     }
 
+    #[cfg(feature = "emu")]
+    fn trace_status(regs: RegisterBlock<caliptra_ureg::RealMmioMut>, event: &str, phase: &str) {
+        let status = u32::from(regs.mldsa_status().read());
+        let error_global = u32::from(regs.intr_block_rf().error_global_intr_r().read());
+        let error_internal = u32::from(regs.intr_block_rf().error_internal_intr_r().read());
+        crate::cprintln!(
+            "[mldsa] {} {} status=0x{:08x} error_global=0x{:08x} error_internal=0x{:08x}",
+            event,
+            phase,
+            status,
+            error_global,
+            error_internal
+        );
+    }
+
+    #[cfg(not(feature = "emu"))]
+    #[inline(always)]
+    fn trace_status(_regs: RegisterBlock<caliptra_ureg::RealMmioMut>, _event: &str, _phase: &str) {}
+
     // Wait on the provided condition OR the error condition defined in this function
     // In the event of the error condition being set, clear the error bits and return an error
-    fn wait<F>(regs: RegisterBlock<caliptra_ureg::RealMmioMut>, condition: F) -> CaliptraResult<()>
+    fn wait<F>(
+        regs: RegisterBlock<caliptra_ureg::RealMmioMut>,
+        phase: &str,
+        condition: F,
+    ) -> CaliptraResult<()>
     where
         F: Fn() -> bool,
     {
@@ -128,7 +151,9 @@ impl<'a> Mldsa87<'a> {
         };
 
         // Wait for either the given condition or the error condition
+        Self::trace_status(regs, "wait", phase);
         wait::until(|| condition() || err_condition());
+        Self::trace_status(regs, "done", phase);
 
         if err_condition() {
             // Clear the errors
@@ -185,7 +210,9 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "keygen-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Copy seed to the hardware
         match seed {
@@ -200,13 +227,18 @@ impl<'a> Mldsa87<'a> {
         }
 
         // Generate randomness for SCA protection.
-        trng.generate16()?.write_to_reg(mldsa.entropy());
+        Self::trace_status(mldsa, "start", "keygen-entropy");
+        let entropy = trng.generate16()?;
+        Self::trace_status(mldsa, "done", "keygen-entropy");
+        entropy.write_to_reg(mldsa.entropy());
 
         // Program the command register for key generation
         mldsa.mldsa_ctrl().write(|w| w.ctrl(KEYGEN));
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().valid())?;
+        Mldsa87::wait(mldsa, "keygen-valid", || {
+            mldsa.mldsa_status().read().valid()
+        })?;
 
         // Copy pubkey
         let pubkey = Mldsa87PubKey::read_from_reg(mldsa.mldsa_pubkey());
@@ -259,7 +291,9 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "sign-fixed-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Copy seed or the private key to the hardware
         match seed {
@@ -286,7 +320,10 @@ impl<'a> Mldsa87<'a> {
         sign_rnd.write_to_reg(mldsa.mldsa_sign_rnd());
 
         // Generate randomness for SCA protection.
-        trng.generate16()?.write_to_reg(mldsa.entropy());
+        Self::trace_status(mldsa, "start", "sign-fixed-entropy");
+        let entropy = trng.generate16()?;
+        Self::trace_status(mldsa, "done", "sign-fixed-entropy");
+        entropy.write_to_reg(mldsa.entropy());
 
         // Program the command register for key generation
         mldsa.mldsa_ctrl().write(|w| {
@@ -295,7 +332,9 @@ impl<'a> Mldsa87<'a> {
         });
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().valid())?;
+        Mldsa87::wait(mldsa, "sign-fixed-valid", || {
+            mldsa.mldsa_status().read().valid()
+        })?;
 
         // Copy signature
         let signature = Mldsa87Signature::read_from_reg(mldsa.mldsa_signature());
@@ -369,7 +408,7 @@ impl<'a> Mldsa87<'a> {
         msg: &[u8],
     ) -> CaliptraResult<()> {
         // Wait for stream ready or valid status.
-        Mldsa87::wait(mldsa, || {
+        Mldsa87::wait(mldsa, "stream-ready", || {
             mldsa.mldsa_status().read().msg_stream_ready() || mldsa.mldsa_status().read().valid()
         })?;
 
@@ -406,7 +445,9 @@ impl<'a> Mldsa87<'a> {
         mldsa.mldsa_msg().at(0).write(|_| last_word);
 
         // Wait for status to be valid
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().valid())?;
+        Mldsa87::wait(mldsa, "stream-valid", || {
+            mldsa.mldsa_status().read().valid()
+        })?;
 
         Ok(())
     }
@@ -423,13 +464,18 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "sign-var-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Sign RND.
         sign_rnd.write_to_reg(mldsa.mldsa_sign_rnd());
 
         // Generate randomness for SCA protection.
-        trng.generate16()?.write_to_reg(mldsa.entropy());
+        Self::trace_status(mldsa, "start", "sign-var-entropy");
+        let entropy = trng.generate16()?;
+        Self::trace_status(mldsa, "done", "sign-var-entropy");
+        entropy.write_to_reg(mldsa.entropy());
 
         // Copy seed or the private key to the hardware
         match seed {
@@ -485,13 +531,18 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "sign-var-no-verify-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Sign RND.
         sign_rnd.write_to_reg(mldsa.mldsa_sign_rnd());
 
         // Generate randomness for SCA protection.
-        trng.generate16()?.write_to_reg(mldsa.entropy());
+        Self::trace_status(mldsa, "start", "sign-var-no-verify-entropy");
+        let entropy = trng.generate16()?;
+        Self::trace_status(mldsa, "done", "sign-var-no-verify-entropy");
+        entropy.write_to_reg(mldsa.entropy());
 
         // Copy seed or the private key to the hardware
         match seed {
@@ -548,7 +599,9 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "verify-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Copy pubkey
         pub_key.write_to_reg(mldsa.mldsa_pubkey());
@@ -582,7 +635,9 @@ impl<'a> Mldsa87<'a> {
             .write(|w| w.ctrl(VERIFY).external_mu(external_mu));
 
         // Wait for status to be valid
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().valid())?;
+        Mldsa87::wait(mldsa, "verify-fixed-valid", || {
+            mldsa.mldsa_status().read().valid()
+        })?;
 
         // Copy the random value
         let verify_res = LEArray4x16::read_from_reg(mldsa.mldsa_verify_res());
@@ -669,17 +724,24 @@ impl<'a> Mldsa87<'a> {
         let mldsa = self.mldsa87.regs_mut();
 
         // Wait for hardware ready
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready())?;
+        Mldsa87::wait(mldsa, "pcr-sign-ready", || {
+            mldsa.mldsa_status().read().ready()
+        })?;
 
         // Generate randomness for SCA protection.
-        trng.generate16()?.write_to_reg(mldsa.entropy());
+        Self::trace_status(mldsa, "start", "pcr-sign-entropy");
+        let entropy = trng.generate16()?;
+        Self::trace_status(mldsa, "done", "pcr-sign-entropy");
+        entropy.write_to_reg(mldsa.entropy());
 
         mldsa
             .mldsa_ctrl()
             .write(|w| w.pcr_sign(true).ctrl(KEYGEN_SIGN));
 
         // Wait for command to complete
-        Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().valid())?;
+        Mldsa87::wait(mldsa, "pcr-sign-valid", || {
+            mldsa.mldsa_status().read().valid()
+        })?;
 
         // Copy signature
         let signature = Mldsa87Signature::read_from_reg(mldsa.mldsa_signature());
@@ -707,7 +769,9 @@ impl<'a> Mldsa87<'a> {
         let mldsa = mldsa_reg.regs_mut();
 
         // Wait for hardware ready. Ignore errors
-        let _ = Mldsa87::wait(mldsa, || mldsa.mldsa_status().read().ready());
+        let _ = Mldsa87::wait(mldsa, "zeroize-ready", || {
+            mldsa.mldsa_status().read().ready()
+        });
     }
 
     /// Zeroize the hardware registers without waiting for readiness.

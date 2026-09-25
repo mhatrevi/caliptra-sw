@@ -58,9 +58,16 @@ impl Mldsa87Kat {
     /// * `mldsa87` - MLDSA-87 driver
     /// * `trng`    - TRNG driver
     pub fn execute(&self, mldsa87: &mut Mldsa87, trng: &mut Trng) -> CaliptraResult<()> {
+        caliptra_drivers::cprintln!("[kat][mldsa] keygen + PCT start");
         let pub_key = Self::kat_keygen(mldsa87, trng)?;
+        caliptra_drivers::cprintln!("[kat][mldsa] keygen + PCT complete");
+        caliptra_drivers::cprintln!("[kat][mldsa] sign + verify start");
         let signature = Self::kat_sign(mldsa87, trng, &pub_key)?;
-        Self::kat_verify(mldsa87, &pub_key, &signature)
+        caliptra_drivers::cprintln!("[kat][mldsa] sign + verify complete");
+        caliptra_drivers::cprintln!("[kat][mldsa] standalone verify start");
+        Self::kat_verify(mldsa87, &pub_key, &signature)?;
+        caliptra_drivers::cprintln!("[kat][mldsa] standalone verify complete");
+        Ok(())
     }
 
     /// KeyGen CAST: derive an MLDSA-87 key pair from the fixed `SEED` and
@@ -74,12 +81,16 @@ impl Mldsa87Kat {
             .key_pair(Mldsa87Seed::Array4x8(&SEED), trng, Some(&mut priv_key))
             .map_err(|_| CaliptraError::KAT_MLDSA87_KEY_PAIR_GENERATE_FAILURE)?;
 
+        caliptra_drivers::cprintln!("[kat][mldsa] public-key digest start");
         let pub_key_digest = sha2
             .sha512_digest(pub_key.as_bytes())
             .map_err(|_| CaliptraError::KAT_SHA384_DIGEST_FAILURE)?;
+        caliptra_drivers::cprintln!("[kat][mldsa] public-key digest complete");
+        caliptra_drivers::cprintln!("[kat][mldsa] private-key digest start");
         let priv_key_digest = sha2
             .sha512_digest(priv_key.as_bytes())
             .map_err(|_| CaliptraError::KAT_SHA384_DIGEST_FAILURE)?;
+        caliptra_drivers::cprintln!("[kat][mldsa] private-key digest complete");
 
         if pub_key_digest != KAT_PUB_KEY_DIGEST || priv_key_digest != KAT_PRIV_KEY_DIGEST {
             Err(CaliptraError::KAT_MLDSA87_KEY_PAIR_VERIFY_FAILURE)?;
@@ -108,9 +119,11 @@ impl Mldsa87Kat {
             )
             .map_err(|_| CaliptraError::KAT_MLDSA87_SIGNATURE_FAILURE)?;
 
+        caliptra_drivers::cprintln!("[kat][mldsa] signature digest start");
         let signature_digest = sha2
             .sha512_digest(signature.as_bytes())
             .map_err(|_| CaliptraError::KAT_SHA384_DIGEST_FAILURE)?;
+        caliptra_drivers::cprintln!("[kat][mldsa] signature digest complete");
 
         if signature_digest != KAT_SIGNATURE_DIGEST {
             Err(CaliptraError::KAT_MLDSA87_SIGNATURE_MISMATCH)?;
