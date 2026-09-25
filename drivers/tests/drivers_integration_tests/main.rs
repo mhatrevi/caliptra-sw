@@ -10,8 +10,8 @@ use caliptra_drivers_test_bin::{
     DoeTestResults, OCP_LOCK_WARM_RESET_MAGIC_BOOT_STATUS, PLAINTEXT_MEK,
 };
 use caliptra_hw_model::{
-    BootParams, CodeRange, DefaultHwModel, DeviceLifecycle, Fuses, HwModel, ImageInfo, InitParams,
-    ModelError, SecurityState, StackInfo, StackRange, TrngMode,
+    BootParams, CaliptraHwVersion, CodeRange, DefaultHwModel, DeviceLifecycle, Fuses, HwModel,
+    ImageInfo, InitParams, ModelError, SecurityState, StackInfo, StackRange, TrngMode,
 };
 use caliptra_hw_model_types::EtrngResponse;
 use caliptra_registers::mbox::enums::MboxStatusE;
@@ -40,6 +40,18 @@ fn start_driver_test_with_boot_params(
     test_rom: &'static FwId,
     boot_params: BootParams,
 ) -> Result<DefaultHwModel, Box<dyn Error>> {
+    start_driver_test_with_boot_params_and_hw_version(
+        test_rom,
+        boot_params,
+        CaliptraHwVersion::default(),
+    )
+}
+
+fn start_driver_test_with_boot_params_and_hw_version(
+    test_rom: &'static FwId,
+    boot_params: BootParams,
+    hw_version: CaliptraHwVersion,
+) -> Result<DefaultHwModel, Box<dyn Error>> {
     let rom = caliptra_builder::build_firmware_rom(test_rom)?;
     let image_info = vec![ImageInfo::new(
         StackRange::new(STACK_START, STACK_END),
@@ -48,6 +60,7 @@ fn start_driver_test_with_boot_params(
     )];
     caliptra_hw_model::new(
         InitParams {
+            hw_version,
             rom: &rom,
             subsystem_mode: true,
             stack_info: Some(StackInfo::new(image_info)),
@@ -64,6 +77,16 @@ fn start_driver_test(test_rom: &'static FwId) -> Result<DefaultHwModel, Box<dyn 
 fn run_driver_test(test_rom: &'static FwId) {
     let mut model = start_driver_test(test_rom).unwrap();
     // Wrap in a line-writer so output from different test threads doesn't multiplex within a line.
+    model.step_until_exit_success().unwrap();
+}
+
+fn run_driver_test_with_hw_version(test_rom: &'static FwId, hw_version: CaliptraHwVersion) {
+    let mut model = start_driver_test_with_boot_params_and_hw_version(
+        test_rom,
+        BootParams::default(),
+        hw_version,
+    )
+    .unwrap();
     model.step_until_exit_success().unwrap();
 }
 
@@ -395,7 +418,12 @@ fn test_error_reporter() {
 
 #[test]
 fn test_hmac() {
-    run_driver_test(&firmware::driver_tests::HMAC);
+    let hw_version = if caliptra_registers::HMAC_LAST_BLOCK_SUPPORTED {
+        CaliptraHwVersion::V2_2
+    } else {
+        CaliptraHwVersion::V2_1
+    };
+    run_driver_test_with_hw_version(&firmware::driver_tests::HMAC, hw_version);
 }
 
 #[test]

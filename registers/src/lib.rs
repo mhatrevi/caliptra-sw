@@ -30,3 +30,24 @@ pub use soc_ifc::regs::{
     CptraItrngEntropyConfig0ReadVal, CptraItrngEntropyConfig0WriteVal,
     CptraItrngEntropyConfig1ReadVal, CptraItrngEntropyConfig1WriteVal,
 };
+
+/// Whether the selected hardware revision requires HMAC final-block signaling.
+pub const HMAC_LAST_BLOCK_SUPPORTED: bool = cfg!(hw_rev = "latest");
+
+/// Sets the HMAC final-block control bit when supported by the selected hardware revision.
+#[inline(always)]
+pub fn set_hmac_last_block(
+    value: hmac::regs::Hmac512CtrlWriteVal,
+    last: bool,
+) -> hmac::regs::Hmac512CtrlWriteVal {
+    #[cfg(hw_rev = "latest")]
+    {
+        value.last(last)
+    }
+
+    #[cfg(hw_rev = "2.1")]
+    {
+        let _ = last;
+        value
+    }
+}

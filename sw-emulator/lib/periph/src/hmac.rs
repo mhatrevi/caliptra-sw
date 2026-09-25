@@ -19,6 +19,7 @@ use caliptra_emu_crypto::EndianessTransform;
 use caliptra_emu_crypto::{Hmac512, Hmac512Interface, Hmac512Mode};
 use caliptra_emu_derive::Bus;
 use caliptra_emu_types::{RvData, RvSize};
+use caliptra_hw_model_types::CaliptraHwVersion;
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 use tock_registers::register_bitfields;
 use tock_registers::registers::InMemoryRegister;
@@ -37,7 +38,8 @@ register_bitfields! [
             HMAC512 = 1,
         ],
         CSR_MODE OFFSET(4) NUMBITS(1) [],
-        RSVD OFFSET(4) NUMBITS(28) [],
+        LAST OFFSET(5) NUMBITS(1) [],
+        RSVD OFFSET(6) NUMBITS(26) [],
     ],
 
     /// Status Register Fields
@@ -223,6 +225,9 @@ pub struct HmacSha {
 
     /// CSR Key
     csr_key: [u32; HMAC_KEY_SIZE_DWORD_512],
+
+    /// Hardware revision modeled by this peripheral.
+    hw_version: CaliptraHwVersion,
 }
 
 impl HmacSha {
@@ -249,6 +254,15 @@ impl HmacSha {
     ///
     /// * `Self` - Instance of HMAC-SHA-384 Engine
     pub fn new(clock: &Clock, key_vault: KeyVault) -> Self {
+        Self::new_with_hw_version(clock, key_vault, CaliptraHwVersion::V2_1)
+    }
+
+    /// Create a new HMAC engine for a specific Caliptra hardware revision.
+    pub fn new_with_hw_version(
+        clock: &Clock,
+        key_vault: KeyVault,
+        hw_version: CaliptraHwVersion,
+    ) -> Self {
         Self {
             hmac: Box::new(Hmac512::<HMAC_KEY_SIZE_BYTES_512>::new(Hmac512Mode::Sha512)),
             name0: ReadOnlyRegister::new(Self::NAME0_VAL),
@@ -277,6 +291,7 @@ impl HmacSha {
             op_block_read_complete_action: None,
             op_tag_write_complete_action: None,
             csr_key: DEFAULT_CSR_HMAC_KEY,
+            hw_version,
         }
     }
 
@@ -533,6 +548,13 @@ impl HmacSha {
     }
 
     fn op_complete(&mut self) {
+        if self.hw_version >= CaliptraHwVersion::V2_2 && !self.control.reg.is_set(Control::LAST) {
+            self.status
+                .reg
+                .modify(Status::READY::SET + Status::VALID::CLEAR);
+            return;
+        }
+
         // Retrieve the tag
         let key_len = self.key_len();
 
@@ -778,6 +800,49 @@ mod tests {
     }
 
     #[test]
+    fn test_v2_2_requires_last_for_valid_status() {
+        let clock = Clock::new();
+        let mut hmac =
+            HmacSha::new_with_hw_version(&clock, KeyVault::new(), CaliptraHwVersion::V2_2);
+
+        hmac.write(
+            RvSize::Word,
+            OFFSET_CONTROL,
+            (Control::INIT::SET + Control::MODE::HMAC384).into(),
+        )
+        .unwrap();
+
+        loop {
+            let status = InMemoryRegister::<u32, Status::Register>::new(
+                hmac.read(RvSize::Word, OFFSET_STATUS).unwrap(),
+            );
+            if status.is_set(Status::READY) {
+                assert!(!status.is_set(Status::VALID));
+                break;
+            }
+            clock.increment_and_process_timer_actions(1, &mut hmac);
+        }
+
+        hmac.write(
+            RvSize::Word,
+            OFFSET_CONTROL,
+            (Control::NEXT::SET + Control::LAST::SET + Control::MODE::HMAC384).into(),
+        )
+        .unwrap();
+
+        loop {
+            let status = InMemoryRegister::<u32, Status::Register>::new(
+                hmac.read(RvSize::Word, OFFSET_STATUS).unwrap(),
+            );
+            if status.is_set(Status::VALID) {
+                assert!(status.is_set(Status::READY));
+                break;
+            }
+            clock.increment_and_process_timer_actions(1, &mut hmac);
+        }
+    }
+
+    #[test]
     fn test_key() {
         let mut hmac = HmacSha::new(&Clock::new(), KeyVault::new());
         for addr in (OFFSET_KEY..(OFFSET_KEY + HMAC_KEY_SIZE_384 as u32)).step_by(4) {
@@ -994,7 +1059,7 @@ mod tests {
             );
         }
 
-        let mut hmac = HmacSha::new(&clock, key_vault);
+        let mut hmac = HmacSha::new_with_hw_version(&clock, key_vault, CaliptraHwVersion::V2_2);
 
         if tag_to_kv {
             // Instruct tag to be read from key-vault.
@@ -1103,6 +1168,7 @@ mod tests {
             }
 
             let mode512 = key.len() == 64;
+            let last = idx + 1 == totalblocks;
 
             if idx == 0 {
                 assert_eq!(
@@ -1114,6 +1180,11 @@ mod tests {
                                 Control::MODE::HMAC512
                             } else {
                                 Control::MODE::HMAC384
+                            }
+                            + if last {
+                                Control::LAST::SET
+                            } else {
+                                Control::LAST::CLEAR
                             })
                         .into()
                     )
@@ -1130,6 +1201,11 @@ mod tests {
                                 Control::MODE::HMAC512
                             } else {
                                 Control::MODE::HMAC384
+                            }
+                            + if last {
+                                Control::LAST::SET
+                            } else {
+                                Control::LAST::CLEAR
                             })
                         .into()
                     )
@@ -1139,7 +1215,15 @@ mod tests {
             }
 
             loop {
-                if !tag_to_kv {
+                if !last {
+                    let status = InMemoryRegister::<u32, Status::Register>::new(
+                        hmac.read(RvSize::Word, OFFSET_STATUS).unwrap(),
+                    );
+
+                    if status.is_set(Status::READY) && !status.is_set(Status::VALID) {
+                        break;
+                    }
+                } else if !tag_to_kv {
                     let status = InMemoryRegister::<u32, Status::Register>::new(
                         hmac.read(RvSize::Word, OFFSET_STATUS).unwrap(),
                     );

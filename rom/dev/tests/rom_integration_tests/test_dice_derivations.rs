@@ -6,10 +6,7 @@ use caliptra_builder::firmware::APP_WITH_UART;
 use caliptra_builder::ImageOptions;
 use caliptra_common::mailbox_api::CommandId;
 use caliptra_common::RomBootStatus::*;
-use caliptra_hw_model::BootParams;
-use caliptra_hw_model::Fuses;
-use caliptra_hw_model::HwModel;
-use caliptra_hw_model::InitParams;
+use caliptra_hw_model::{BootParams, CaliptraHwVersion, Fuses, HwModel, InitParams};
 
 use crate::helpers;
 
@@ -122,6 +119,11 @@ fn test_cold_reset_success() {
         let mut hw = caliptra_hw_model::new(
             InitParams {
                 fuses,
+                hw_version: if caliptra_registers::HMAC_LAST_BLOCK_SUPPORTED {
+                    CaliptraHwVersion::V2_2
+                } else {
+                    CaliptraHwVersion::V2_1
+                },
                 rom: &rom,
                 ..Default::default()
             },
