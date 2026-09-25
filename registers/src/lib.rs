@@ -34,6 +34,21 @@ pub use soc_ifc::regs::{
 /// Whether the selected hardware revision requires HMAC final-block signaling.
 pub const HMAC_LAST_BLOCK_SUPPORTED: bool = cfg!(hw_rev = "latest");
 
+/// Returns the hardware ML-DSA signature-verification verdict when supported.
+#[inline(always)]
+pub fn mldsa_verify_pass(status: abr::regs::MldsaStatusReadVal) -> bool {
+    #[cfg(hw_rev = "latest")]
+    {
+        status.verify_pass()
+    }
+
+    #[cfg(hw_rev = "2.1")]
+    {
+        let _ = status;
+        true
+    }
+}
+
 /// Programs and locks the ICCM regions used by the hardware boot-flow monitor.
 #[inline(always)]
 pub fn configure_iccm_regions(

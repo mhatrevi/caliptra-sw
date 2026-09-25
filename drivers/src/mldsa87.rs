@@ -639,13 +639,15 @@ impl<'a> Mldsa87<'a> {
             mldsa.mldsa_status().read().valid()
         })?;
 
+        let verify_pass = caliptra_registers::mldsa_verify_pass(mldsa.mldsa_status().read());
+
         // Copy the random value
         let verify_res = LEArray4x16::read_from_reg(mldsa.mldsa_verify_res());
 
         // Clear the hardware when done
         mldsa.mldsa_ctrl().write(|w| w.zeroize(true));
 
-        let result = if verify_res.0 == truncated_signature {
+        let result = if verify_pass && verify_res.0 == truncated_signature {
             cfi_assert_eq_16_words(&verify_res.0, &truncated_signature);
             Mldsa87Result::Success
         } else {
@@ -693,13 +695,15 @@ impl<'a> Mldsa87<'a> {
         // Program the message to the hardware
         Mldsa87::program_var_msg(mldsa, msg)?;
 
+        let verify_pass = caliptra_registers::mldsa_verify_pass(mldsa.mldsa_status().read());
+
         // Copy the result
         let verify_res = LEArray4x16::read_from_reg(mldsa.mldsa_verify_res());
 
         // Clear the hardware when done
         mldsa.mldsa_ctrl().write(|w| w.zeroize(true));
 
-        let result = if verify_res.0 == truncated_signature {
+        let result = if verify_pass && verify_res.0 == truncated_signature {
             cfi_assert_eq_16_words(&verify_res.0, &truncated_signature);
             Mldsa87Result::Success
         } else {

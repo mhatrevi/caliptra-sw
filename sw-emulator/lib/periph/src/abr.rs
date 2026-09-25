@@ -164,6 +164,8 @@ register_bitfields! [
         READY OFFSET(0) NUMBITS(1) [],
         VALID OFFSET(1) NUMBITS(1) [],
         MSG_STREAM_READY OFFSET(2) NUMBITS(1) [],
+        ERROR OFFSET(3) NUMBITS(1) [],
+        VERIFY_PASS OFFSET(4) NUMBITS(1) [],
     ],
 
     /// ML-KEM Status Register Fields
@@ -528,9 +530,11 @@ impl Abr {
                 );
 
                 // Reset the Ready and Valid status bits
-                self.mldsa_status
-                    .reg
-                    .modify(MlDsaStatus::READY::CLEAR + MlDsaStatus::VALID::CLEAR);
+                self.mldsa_status.reg.modify(
+                    MlDsaStatus::READY::CLEAR
+                        + MlDsaStatus::VALID::CLEAR
+                        + MlDsaStatus::VERIFY_PASS::CLEAR,
+                );
 
                 // If streaming message mode is enabled, set the MSG_STREAM_READY bit
                 // and wait for the message to be streamed in
@@ -555,9 +559,11 @@ impl Abr {
             }
             Some(MlDsaControl::CTRL::Value::VERIFYING) => {
                 // Reset the Ready and Valid status bits
-                self.mldsa_status
-                    .reg
-                    .modify(MlDsaStatus::READY::CLEAR + MlDsaStatus::VALID::CLEAR);
+                self.mldsa_status.reg.modify(
+                    MlDsaStatus::READY::CLEAR
+                        + MlDsaStatus::VALID::CLEAR
+                        + MlDsaStatus::VERIFY_PASS::CLEAR,
+                );
 
                 if self.mldsa_ctrl.reg.is_set(MlDsaControl::STREAM_MSG) {
                     // Clear any previous streamed message
@@ -808,7 +814,7 @@ impl Abr {
         self.mldsa_signature = words_from_bytes_le(&signature_extended);
     }
 
-    fn mldsa_verify(&mut self) {
+    fn mldsa_verify(&mut self) -> bool {
         let key_bytes = bytes_from_words_le(&self.mldsa_pubkey);
         let sig = bytes_from_words_le(&self.mldsa_signature);
         let signature = &sig[..SIG_LEN].try_into().unwrap();
@@ -825,6 +831,8 @@ impl Abr {
         } else {
             self.mldsa_verify_res = [0u32; ML_DSA87_VERIFICATION_SIZE_BYTES / 4];
         }
+
+        success
     }
 
     fn mldsa_verify_msg(&mut self, key_bytes: [u8; PK_LEN], signature: &[u8; SIG_LEN]) -> bool {
@@ -869,10 +877,14 @@ impl Abr {
     }
 
     fn mldsa_op_complete(&mut self) {
-        match self.mldsa_ctrl.reg.read_as_enum(MlDsaControl::CTRL) {
-            Some(MlDsaControl::CTRL::Value::KEYGEN) => self.mldsa_gen_key(),
+        let verify_pass = match self.mldsa_ctrl.reg.read_as_enum(MlDsaControl::CTRL) {
+            Some(MlDsaControl::CTRL::Value::KEYGEN) => {
+                self.mldsa_gen_key();
+                false
+            }
             Some(MlDsaControl::CTRL::Value::SIGNING) => {
                 self.mldsa_sign(true);
+                false
             }
             Some(MlDsaControl::CTRL::Value::VERIFYING) => self.mldsa_verify(),
             Some(MlDsaControl::CTRL::Value::KEYGEN_AND_SIGN) => {
@@ -882,14 +894,16 @@ impl Abr {
                     self.mldsa_gen_key();
                     self.mldsa_sign(false);
                 }
+                false
             }
             _ => panic!("Invalid value in ML-DSA Control"),
-        }
+        };
 
         self.mldsa_status.reg.modify(
             MlDsaStatus::READY::SET
                 + MlDsaStatus::VALID::SET
-                + MlDsaStatus::MSG_STREAM_READY::CLEAR,
+                + MlDsaStatus::MSG_STREAM_READY::CLEAR
+                + MlDsaStatus::VERIFY_PASS.val(u32::from(verify_pass)),
         );
     }
 
@@ -964,7 +978,8 @@ impl Abr {
         self.mldsa_status.reg.modify(
             MlDsaStatus::READY::SET
                 + MlDsaStatus::VALID::CLEAR
-                + MlDsaStatus::MSG_STREAM_READY::CLEAR,
+                + MlDsaStatus::MSG_STREAM_READY::CLEAR
+                + MlDsaStatus::VERIFY_PASS::CLEAR,
         );
     }
 
@@ -1787,6 +1802,10 @@ mod tests {
             sig
         };
         assert_eq!(result, &sig_for_comp[..ML_DSA87_VERIFICATION_SIZE_BYTES]);
+        let status = InMemoryRegister::<u32, MlDsaStatus::Register>::new(
+            ml_dsa87.read(RvSize::Word, OFFSET_MLDSA_STATUS).unwrap(),
+        );
+        assert!(status.is_set(MlDsaStatus::VERIFY_PASS));
 
         // Bad signature
         let mut rng = rand::thread_rng();
@@ -1825,6 +1844,10 @@ mod tests {
         }
 
         let result = bytes_from_words_le(&ml_dsa87.mldsa_verify_res);
+        let status = InMemoryRegister::<u32, MlDsaStatus::Register>::new(
+            ml_dsa87.read(RvSize::Word, OFFSET_MLDSA_STATUS).unwrap(),
+        );
+        assert!(!status.is_set(MlDsaStatus::VERIFY_PASS));
         assert_ne!(
             result,
             &sig_for_comp[sig_for_comp.len() - ML_DSA87_VERIFICATION_SIZE_BYTES..]
