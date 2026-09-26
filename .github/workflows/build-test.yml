@@ -83,7 +83,7 @@ jobs:
           done
 
       - name: Pull Caliptra subsystem RTL submodule
-        run: git submodule update --init hw/latest/caliptra-ss
+        run: git submodule update --init --recursive hw/latest/caliptra-ss
 
       - name: Build hw-model with fpga_realtime, fpga_subsystem, itrng, coverage
         run: |

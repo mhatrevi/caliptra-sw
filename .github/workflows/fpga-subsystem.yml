@@ -123,7 +123,7 @@ jobs:
           ref: ${{ inputs.branch }}
 
       - name: Pull Caliptra subsystem RTL submodule
-        run: git submodule update --init hw/latest/caliptra-ss
+        run: git submodule update --init --recursive hw/latest/caliptra-ss
 
       - name: Restore sysroot from cache
         uses: actions/cache/restore@v3

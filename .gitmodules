@@ -1,6 +1,6 @@
-# Typical firmware development will not need this submodule. Future
-# commits should only use it when running verilated test cases or updating
-# the caliptra-registers crate.
+# Caliptra-SS is the canonical integration source for generated register
+# accessors. The standalone RTL and I3C submodules are kept aligned with its
+# nested gitlinks for verilated, release, and other hardware workflows.
 [submodule "hw/latest/rtl"]
 	path = hw/latest/rtl
 	url = https://github.com/chipsalliance/caliptra-rtl
@@ -11,6 +11,7 @@
 [submodule "hw/latest/caliptra-ss"]
 	path = hw/latest/caliptra-ss
 	url = https://github.com/chipsalliance/caliptra-ss.git
+	branch = main
 [submodule "hw/rev-2_1/i3c-core-rtl"]
 	path = hw/rev-2_1/i3c-core-rtl
 	url = https://github.com/chipsalliance/i3c-core.git

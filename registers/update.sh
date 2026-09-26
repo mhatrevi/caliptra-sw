@@ -12,11 +12,16 @@ fi
 
 echo $"Updating /hw/$1/"
 
-if [[ ! -f $"../hw/$1/rtl/.git" ]]; then
-    echo "/hw/$1/rtl submodules are not populated"
-    echo "Please run 'git submodule update --init'"
-    exit 1
-fi
+caliptra_ss_dir="../hw/$1/caliptra-ss"
+caliptra_rtl_dir="$caliptra_ss_dir/third_party/caliptra-rtl"
+i3c_core_dir="$caliptra_ss_dir/third_party/i3c-core"
 
+for repo_dir in "$caliptra_ss_dir" "$caliptra_rtl_dir" "$i3c_core_dir"; do
+    if ! git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "$repo_dir is not populated"
+        echo "Please run 'git submodule update --init --recursive hw/$1/caliptra-ss'"
+        exit 1
+    fi
+done
 
-cargo run --manifest-path bin/generator/Cargo.toml -- ../hw/$1/rtl bin/extra-rdl/ ../hw/$1/i3c-core-rtl ../hw/$1/caliptra-ss ../hw/$1/registers/src/
+cargo run --manifest-path bin/generator/Cargo.toml -- "$caliptra_ss_dir" bin/extra-rdl/ "../hw/$1/registers/src/"
