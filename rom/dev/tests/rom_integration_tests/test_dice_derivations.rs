@@ -6,7 +6,9 @@ use caliptra_builder::firmware::APP_WITH_UART;
 use caliptra_builder::ImageOptions;
 use caliptra_common::mailbox_api::CommandId;
 use caliptra_common::RomBootStatus::*;
-use caliptra_hw_model::{BootParams, CaliptraHwVersion, Fuses, HwModel, InitParams};
+use caliptra_hw_model::{
+    BootParams, CaliptraHwVersion, DeviceLifecycle, Fuses, HwModel, InitParams, SecurityState,
+};
 
 use crate::helpers;
 
@@ -138,6 +140,34 @@ fn test_cold_reset_success() {
 
         hw.step_until_exit_success().unwrap();
     }
+}
+
+#[test]
+fn test_rom_enables_jtag_debug_before_kats() {
+    let rom = caliptra_builder::build_firmware_rom(crate::helpers::rom_from_env()).unwrap();
+    let security_state = *SecurityState::default()
+        .set_device_lifecycle(DeviceLifecycle::Production)
+        .set_debug_locked(false);
+    let fuses = Fuses {
+        life_cycle: DeviceLifecycle::Production,
+        ..Default::default()
+    };
+    let mut hw = caliptra_hw_model::new(
+        InitParams {
+            fuses,
+            security_state,
+            subsystem_mode: true,
+            debug_intent: true,
+            rom: &rom,
+            ..Default::default()
+        },
+        BootParams::default(),
+    )
+    .unwrap();
+
+    hw.step_until_boot_status(KatStarted.into(), true);
+    assert_eq!(hw.soc_ifc().ss_soc_dbg_unlock_level().at(0).read(), 1);
+    assert!(!hw.soc_ifc().cptra_security_state().read().debug_locked());
 }
 
 #[test]

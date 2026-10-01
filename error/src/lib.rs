@@ -2480,6 +2480,16 @@ impl CaliptraError {
             "ROM Error: Invalid ROM persistent data version"
         ),
         (
+            ROM_GLOBAL_JTAG_DEBUG_INTENT_NOT_SET,
+            0x01050013,
+            "ROM Global Error: JTAG debug intent not set"
+        ),
+        (
+            ROM_GLOBAL_JTAG_DEBUG_UNLOCK_TIMEOUT,
+            0x01050014,
+            "ROM Global Error: JTAG debug unlock timeout"
+        ),
+        (
             KAT_SHA256_DIGEST_FAILURE,
             0x90010001,
             "ROM KAT Error: SHA256 digest failure"

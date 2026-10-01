@@ -62,6 +62,8 @@ const BANNER: &str = r#"
 Running Caliptra ROM ...
 "#;
 
+const JTAG_DEBUG_UNLOCK_TIMEOUT_CYCLES: u64 = 1_000_000;
+
 extern "C" {
     static CALIPTRA_ROM_INFO: RomInfo;
 }
@@ -103,6 +105,10 @@ pub extern "C" fn rom_entry() -> ! {
         Ok(env) => env,
         Err(e) => handle_fatal_error(e.into()),
     };
+
+    if let Err(e) = enable_jtag_debug(&mut env) {
+        handle_fatal_error(e.into());
+    }
 
     // Seed the ABR entropy registers for SCA countermeasures
     if let Err(e) = env.abr.seed_entropy(&mut env.trng) {
@@ -255,6 +261,30 @@ pub extern "C" fn rom_entry() -> ! {
 
     #[cfg(feature = "no-fmc")]
     caliptra_drivers::ExitCtrl::exit(0);
+}
+
+fn enable_jtag_debug(env: &mut RomEnv) -> CaliptraResult<()> {
+    if !env.soc_ifc.subsystem_mode()
+        || env.soc_ifc.lifecycle() != caliptra_drivers::Lifecycle::Production
+    {
+        return Ok(());
+    }
+    if !env.soc_ifc.ss_debug_intent() {
+        return Err(CaliptraError::ROM_GLOBAL_JTAG_DEBUG_INTENT_NOT_SET);
+    }
+
+    cprintln!("[debug] Enabling JTAG debug level 1");
+    env.soc_ifc.set_ss_dbg_unlock_level(1);
+
+    let start = env.soc_ifc.get_timestamp();
+    while env.soc_ifc.debug_locked() {
+        if env.soc_ifc.get_timestamp().wrapping_sub(start) >= JTAG_DEBUG_UNLOCK_TIMEOUT_CYCLES {
+            return Err(CaliptraError::ROM_GLOBAL_JTAG_DEBUG_UNLOCK_TIMEOUT);
+        }
+    }
+
+    cprintln!("[debug] JTAG debug unlocked");
+    Ok(())
 }
 
 fn run_fips_tests(env: &mut KatsEnv<'_, '_>) -> CaliptraResult<InitializedDrivers> {
