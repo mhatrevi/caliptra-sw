@@ -1,0 +1,256 @@
+# Licensed under the Apache-2.0 license
+
+name: Development Draft Release 2.2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-ref:
+        description: 'Development branch, tag, or commit to build'
+        required: true
+        type: string
+        default: caliptra-dev-2.2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-draft-2.2-${{ inputs.source-ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: github.repository == 'mhatrevi/caliptra-sw'
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - name: Resolve immutable development commit
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ inputs.source-ref }}
+        run: |
+          if [[ ! "$SOURCE_REF" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]]; then
+            echo "::error::Invalid source ref"
+            exit 1
+          fi
+          git check-ref-format --allow-onelevel "$SOURCE_REF"
+          source_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_REF" --jq '.sha')"
+          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Source ref did not resolve to a commit"
+            exit 1
+          fi
+          tag="dev-2.2-$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-g${source_sha:0:12}"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          printf 'Source: `%s`\n\nDraft tag: `%s`\n' "$source_sha" "$tag" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CALIPTRA_HW_REV: "2.2"
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      SOURCE_REF: ${{ inputs.source-ref }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - name: Checkout exact source and recursive hardware pins
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify hardware source of truth
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git submodule foreach --recursive 'test "$(git rev-parse HEAD)" = "$sha1"'
+          ss="hw/latest/caliptra-ss"
+          test "$(git rev-parse HEAD:hw/latest/rtl)" = "$(git -C "$ss" rev-parse HEAD:third_party/caliptra-rtl)"
+          test "$(git rev-parse HEAD:hw/latest/i3c-core-rtl)" = "$(git -C "$ss" rev-parse HEAD:third_party/i3c-core)"
+          test "$(git -C hw/latest/rtl rev-parse HEAD:submodules/adams-bridge)" = "$(git -C "$ss/third_party/caliptra-rtl" rev-parse HEAD:submodules/adams-bridge)"
+          git diff --exit-code
+
+      - name: Install native packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends pkg-config libssl-dev zip
+
+      - name: Report pinned Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+          rustup show active-toolchain
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test emulator peripherals and ICCM bounds
+        run: |
+          cargo test --locked -p caliptra-emu-periph --lib
+          cargo test --locked -p caliptra-drivers --lib -- iccm_region_tests
+
+      - name: Test measured boot, update, warm reset, and failure handling
+        run: |
+          cargo test --locked -p caliptra-rom --test rom_integration_tests -- \
+            test_iccm_integrity \
+            test_update_reset_success \
+            test_update_reset_post_load_digest_mismatch_is_fatal \
+            test_warm_reset_success \
+            test_update_reset_non_fw_load_cmd \
+            test_update_reset_fmc_load_addr_mismatch
+
+      - name: Test PCR policy and quotes
+        run: |
+          cargo test --locked -p caliptra-runtime --test runtime_integration_tests -- \
+            test_extend_pcr test_pcr_quote
+
+      - name: Build ROM, FMC, Runtime, and driver test firmware
+        run: cargo run --locked --package xtask -- --rev 2.2 build all
+
+      - name: Build development release bundle
+        run: ./ci-tools/release/build_release.sh "$RELEASE_TAG"
+
+      - name: Record provenance and package checksums
+        run: |
+          git diff --exit-code
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          def command(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          submodules = {}
+          for line in subprocess.check_output(
+              ["git", "submodule", "status", "--recursive"], text=True
+          ).splitlines():
+              if not line.startswith(" "):
+                  raise SystemExit(f"Submodule is not at its recorded pin: {line}")
+              sha, path, *_ = line[1:].split()
+              submodules[path] = sha
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          source_sha = os.environ["SOURCE_SHA"]
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+          metadata = {
+              "schema_version": 1,
+              "release_kind": "development-draft",
+              "tag": os.environ["RELEASE_TAG"],
+              "repository": repository,
+              "requested_ref": os.environ["SOURCE_REF"],
+              "source_commit": source_sha,
+              "workflow_commit": os.environ["GITHUB_SHA"],
+              "workflow_run": run_url,
+              "workflow_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "hardware_revision": "2.2",
+              "hardware_root": {
+                  "path": "hw/latest/caliptra-ss",
+                  "commit": submodules["hw/latest/caliptra-ss"],
+              },
+              "submodule_commits": submodules,
+              "rustc": command("rustc", "--version"),
+              "cargo": command("cargo", "--version"),
+              "toolchain": command("rustup", "show", "active-toolchain"),
+              "validation": [
+                  "formatting",
+                  "emulator peripheral tests",
+                  "ICCM bounds tests",
+                  "measured boot/update/warm-reset/failure regressions",
+                  "PCR extension and quote regressions",
+                  "ROM/FMC/Runtime/driver-test firmware builds",
+              ],
+              "limitations": [
+                  "Repository test signing keys; not for production deployment",
+                  "Production 2.2 firmware requires subsystem mode",
+                  "Warm/hitless boot-region re-arm requires the pending RTL fix",
+                  "Emulator models the intended re-arm; no FPGA or RTL validation",
+              ],
+          }
+          workspace = pathlib.Path("release/workspace")
+          (workspace / "build-metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+          )
+          notes = f"""# {os.environ['RELEASE_TAG']}
+
+          Development snapshot, not a production release.
+
+          - Software: [{source_sha}](https://github.com/{repository}/commit/{source_sha})
+          - Hardware revision: 2.2
+          - Hardware source of truth: Caliptra-SS `{submodules['hw/latest/caliptra-ss']}`
+          - Validation/build run: {run_url}
+          - Complete recursive dependency pins and toolchain: `build-metadata.json`
+
+          The bundle contains ROM/FMC/Runtime binaries and ELFs, LMS and MLDSA
+          image bundles, logging/fake variants, and the existing release support files.
+          Images use repository test signing keys and must not be deployed as
+          production-signed firmware.
+
+          **Hardware prerequisite:** production 2.2 firmware requires subsystem
+          mode. Warm/hitless boot-region re-arm depends on the pending RTL fix.
+          The emulator models the intended reset behavior; this workflow performs
+          no FPGA testing or RTL simulation. Recorded hardware commits are used
+          unchanged, without updating submodules to remote branch tips.
+          """
+          notes = "\n".join(line.removeprefix("          ") for line in notes.splitlines()) + "\n"
+          (workspace / "dev-release-notes.md").write_text(notes)
+          PY
+          zip -j release/release.zip release/workspace/build-metadata.json release/workspace/dev-release-notes.md
+          mv release/release.zip "release/caliptra_${RELEASE_TAG}.zip"
+          cp release/workspace/build-metadata.json release/build-metadata.json
+          cp release/workspace/dev-release-notes.md release/dev-release-notes.md
+          cd release
+          sha256sum "caliptra_${RELEASE_TAG}.zip" build-metadata.json dev-release-notes.md > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dev-release-${{ needs.resolve.outputs.tag }}
+          if-no-files-found: error
+          path: |
+            release/caliptra_${{ needs.resolve.outputs.tag }}.zip
+            release/build-metadata.json
+            release/dev-release-notes.md
+            release/SHA256SUMS
+
+  publish:
+    needs: [resolve, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - name: Download validated artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-release-${{ needs.resolve.outputs.tag }}
+          path: release
+
+      - name: Verify downloaded checksums
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+
+      - name: Create draft prerelease at the exact source commit
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --draft --prerelease --latest=false \
+            --title "$RELEASE_TAG" \
+            --notes-file release/dev-release-notes.md \
+            "release/caliptra_${RELEASE_TAG}.zip" \
+            release/build-metadata.json release/dev-release-notes.md release/SHA256SUMS
+          release_url="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url')"
+          printf 'Draft prerelease: [%s](%s)\n\nSource: `%s`\n' "$RELEASE_TAG" "$release_url" "$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
