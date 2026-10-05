@@ -248,9 +248,57 @@ impl SocIfc {
         soc_ifc_regs.internal_iccm_lock().modify(|w| w.lock(lock));
     }
 
+    /// Program the validated image ranges after DICE derivation, before FMC handoff.
+    pub fn configure_iccm_regions(
+        &mut self,
+        fmc_start: u32,
+        fmc_size: u32,
+        rt_start: u32,
+        rt_size: u32,
+    ) -> CaliptraResult<()> {
+        if !caliptra_registers::HAS_BOOT_FLOW_INTEGRITY {
+            return Err(CaliptraError::DRIVER_SOC_IFC_INVALID_ICCM_REGION);
+        }
+        let bounds = Self::encode_iccm_regions(fmc_start, fmc_size, rt_start, rt_size)?;
+        if !caliptra_registers::program_iccm_regions(&mut self.soc_ifc, bounds) {
+            return Err(CaliptraError::DRIVER_SOC_IFC_ICCM_REGION_COMMIT_FAILURE);
+        }
+        Ok(())
+    }
+
     /// Retrieve reset reason
     pub fn reset_reason(&mut self) -> ResetReason {
         reset_reason()
+    }
+
+    fn encode_iccm_regions(
+        fmc_start: u32,
+        fmc_size: u32,
+        rt_start: u32,
+        rt_size: u32,
+    ) -> CaliptraResult<[u32; 4]> {
+        let invalid = CaliptraError::DRIVER_SOC_IFC_INVALID_ICCM_REGION;
+        let encode = |start: u32, size: u32| -> CaliptraResult<(u32, u32)> {
+            if size == 0 || !start.is_multiple_of(4) || !size.is_multiple_of(4) {
+                return Err(invalid);
+            }
+            let end = start.checked_add(size - 1).ok_or(invalid)?;
+            if !memory_layout::ICCM_RANGE.contains(&start)
+                || !memory_layout::ICCM_RANGE.contains(&end)
+            {
+                return Err(invalid);
+            }
+            Ok((
+                start - memory_layout::ICCM_ORG,
+                end - memory_layout::ICCM_ORG,
+            ))
+        };
+        let (fmc_start, fmc_end) = encode(fmc_start, fmc_size)?;
+        let (rt_start, rt_end) = encode(rt_start, rt_size)?;
+        if fmc_start <= rt_end && rt_start <= fmc_end {
+            return Err(invalid);
+        }
+        Ok([fmc_start, fmc_end, rt_start, rt_end])
     }
 
     /// Set IDEVID CSR ready
@@ -768,4 +816,43 @@ pub enum ResetReason {
 
     /// Unknown Reset
     Unknown,
+}
+
+#[cfg(test)]
+mod iccm_region_tests {
+    use super::*;
+
+    #[test]
+    fn regions_encode_relative_inclusive_bounds() {
+        assert_eq!(
+            SocIfc::encode_iccm_regions(0x4000_0000, 0x1000, 0x4000_9000, 0x10000).unwrap(),
+            [0, 0xfff, 0x9000, 0x18fff]
+        );
+    }
+
+    #[test]
+    fn adjacent_regions_do_not_overlap() {
+        assert_eq!(
+            SocIfc::encode_iccm_regions(0x4000_0000, 0x9000, 0x4000_9000, 0x1000).unwrap(),
+            [0, 0x8fff, 0x9000, 0x9fff]
+        );
+    }
+
+    #[test]
+    fn invalid_regions_fail_before_programming() {
+        for (fmc_start, fmc_size, rt_start, rt_size) in [
+            (0x4000_0000, 0, 0x4000_9000, 0x1000),
+            (0x4000_0002, 0x1000, 0x4000_9000, 0x1000),
+            (0x4000_0000, 3, 0x4000_9000, 0x1000),
+            (0x3fff_fffc, 0x1000, 0x4000_9000, 0x1000),
+            (0x4000_0000, 0x1000, 0x4003_fffc, 8),
+            (u32::MAX - 3, 8, 0x4000_9000, 0x1000),
+            (0x4000_0000, 0x1000, 0x4000_0800, 0x1000),
+        ] {
+            assert_eq!(
+                SocIfc::encode_iccm_regions(fmc_start, fmc_size, rt_start, rt_size),
+                Err(CaliptraError::DRIVER_SOC_IFC_INVALID_ICCM_REGION)
+            );
+        }
+    }
 }

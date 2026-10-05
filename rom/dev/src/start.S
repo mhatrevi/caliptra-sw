@@ -110,10 +110,19 @@ _start:
     //
 
     // Zero ICCM
+#ifdef CALIPTRA_HW_ICCM_MEASUREMENT
+    // Subsystem write measurement starts on the first ICCM store. Initialize
+    // ECC through authenticated image stores, not an unmeasured zeroing pass.
+    li t0, 0x300300e0       // CPTRA_HW_CONFIG
+    lw t1, 0x0(t0)
+    andi t1, t1, 0x20       // SUBSYSTEM_MODE_en
+    bne t1, x0, post_iccm_ecc_init
+#endif
     la a0, ICCM_ORG         // dest
     la a1, ICCM_SIZE        // len 
     call _zero_mem256
 
+post_iccm_ecc_init:
     // Zero DCCM
     la a0, DCCM_ORG         // dest
     la a1, DCCM_SIZE        // len 
@@ -378,4 +387,3 @@ exit_rom:
 1:
     j 1b
     .cfi_endproc
-

@@ -1007,6 +1007,60 @@ During update-reset, the key ladder initialized at cold boot is lengthened if ne
 
         hmac512_kdf(KvSlot2, label: b"si_extend", context: None, KvSlot2)
 
+### 2.2 ICCM loading integrity and boot-region handoff
+
+In 2.2 subsystem mode, ROM verifies copied firmware without reading ICCM as data.
+The boot-flow monitor observes ICCM bank reads, so an ICCM readback from ROM can
+prematurely trigger a firmware transition or a fatal boot-flow error.
+Startup skips the legacy ICCM zeroing pass in this mode: it would start hardware
+measurement before KATs and include unrelated stores in the expected image
+stream. The authenticated image stores initialize ECC for the loaded regions;
+DCCM initialization and legacy/passive ICCM initialization are unchanged.
+
+Before copying, ROM reads staging SRAM in bounded 128-byte chunks. The same
+captured chunk feeds two independent hardware SHA engines: the SHA accelerator
+revalidates each component against its authenticated manifest digest, while the
+SHA controller computes the expected ICCM write-stream digest. Cold boot hashes
+FMC followed by Runtime; update reset hashes Runtime only, retaining FMC.
+The expected PCR4 value is `SHA384(48 zero bytes || SHA384(write stream))`,
+with the inner digest serialized in standard big-endian digest-byte order.
+Both hash passes use the same captured bytes, avoiding a second staging read
+between component revalidation and stream measurement.
+
+All accelerator operations are released before the first ICCM store. After
+copying, ROM sets `INTERNAL_ICCM_LOCK`, waits for hardware PCR4/PCR5 extension and
+accelerator-lock release, and compares PCR4 before acknowledging successful
+firmware loading. A mismatch or completion timeout is fatal after update-copy
+because the previously authenticated Runtime has already been overwritten.
+
+After FMC Alias/DICE derivation, the common handoff programs the FMC and Runtime
+start/end ranges as ICCM-relative offsets. Each shadow register receives two
+identical writes followed by readback; `INTERNAL_ICCM_REGION_LOCK` is then set
+before the first FMC fetch. Entry points must lie within their corresponding
+authenticated component ranges. The region lock and the ICCM write lock have
+different purposes and timing.
+
+The emulator models the planned RTL fix that re-arms all boot-region shadow
+registers and the shared region lock on warm and hitless/update reset. Deployment
+on 2.2 hardware requires that RTL fix; the presently pinned RTL cannot reprogram
+changed Runtime bounds across update reset. No RTL submodule is modified by this
+software integration.
+The emulator finalizes ICCM measurement synchronously; its tests validate the
+protocol, digest byte ordering, and reset semantics, not cycle-accurate SHA
+accelerator timing.
+
+Legacy 2.1 firmware retains post-copy readback verification. Debug-unlocked 2.2
+passive mode also retains readback. Production/debug-locked 2.2 passive loads are
+rejected before copying because that build has no hardware ICCM write measurement
+and readback would violate the boot-monitor contract.
+
+PCR4 is the hardware ICCM Current measurement; PCR5 is Journey. Warm reset
+preserves both. Update reset clears PCR4 and extends the retained PCR5 chain;
+cold reset clears both. Runtime rejects software extension of these reserved
+PCRs on 2.2 builds. The hardware digest covers write data and order, not
+destination addresses, so range validation and correct destination calculation
+remain essential.
+
 ### Alias FMC DICE layer & PCR extension
 
 Alias FMC Layer includes the measurement of the FMC and other security states. This layer is used to assert a composite identity which includes the security state, FMC measurement along with the previous layer identities.

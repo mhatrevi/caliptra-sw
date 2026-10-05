@@ -153,6 +153,29 @@ impl UpdateResetFlow {
             let info = okref(&info)?;
             report_boot_status(UpdateResetImageVerificationComplete.into());
 
+            let expected_iccm = {
+                let source = if env.soc_ifc.subsystem_mode() {
+                    let address = staging_addr
+                        .unwrap_or_else(|| mci_base + caliptra_drivers::dma::MCU_SRAM_OFFSET);
+                    caliptra_common::verifier::ImageSource::Axi {
+                        dma: &env.dma,
+                        axi_start: AxiAddr::from(address),
+                    }
+                } else {
+                    caliptra_common::verifier::ImageSource::MboxMemory(
+                        recv_txn.raw_mailbox_contents(),
+                    )
+                };
+                crate::flow::loaded_image::prepare_iccm_measurement(
+                    &manifest,
+                    &source,
+                    false,
+                    &env.soc_ifc,
+                    &mut env.sha2_512_384,
+                    &mut env.sha2_512_384_acc,
+                )?
+            };
+
             // Populate data vault
             let data_vault = &mut env.persistent_data.get_mut().rom.data_vault;
             Self::populate_data_vault(data_vault, info, &mut env.hmac, &mut env.trng)?;
@@ -178,9 +201,17 @@ impl UpdateResetFlow {
                 &mut env.dma,
                 staging_addr,
             )?;
-            if let Err(err) =
+            let loaded_verification = if let Some(expected) = expected_iccm {
+                crate::flow::loaded_image::verify_iccm_measurement(
+                    &expected,
+                    &mut env.soc_ifc,
+                    &mut env.sha2_512_384_acc,
+                    &env.pcr_bank,
+                )
+            } else {
                 crate::flow::loaded_image::verify_runtime(&manifest, &mut env.sha2_512_384)
-            {
+            };
+            if let Err(err) = loaded_verification {
                 // ICCM no longer contains the previously authenticated runtime, so this
                 // failure cannot use the non-fatal update fallback in `rom_entry`.
                 handle_fatal_error(err.into());

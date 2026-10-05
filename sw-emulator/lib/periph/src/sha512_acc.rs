@@ -11,6 +11,7 @@ Abstract:
     File contains SHA accelerator implementation.
 
 --*/
+use crate::boot_integrity::SharedBootIntegrity;
 use crate::MailboxRam;
 use caliptra_emu_bus::{
     ActionHandle, Bus, BusError, Clock, ReadOnlyMemory, ReadOnlyRegister, ReadWriteRegister, Timer,
@@ -86,6 +87,7 @@ register_bitfields! [
 #[warm_reset_fn(warm_reset)]
 #[update_reset_fn(update_reset)]
 pub struct Sha512AcceleratorRegs {
+    boot_integrity: Option<SharedBootIntegrity>,
     /// LOCK register
     #[register(offset = 0x0000_0000, read_fn = on_read_lock, write_fn = on_write_lock)]
     _lock: ReadWriteRegister<u32, Lock::Register>,
@@ -148,6 +150,7 @@ pub struct Sha512AcceleratorRegs {
 impl Sha512AcceleratorRegs {
     pub fn new(clock: &Clock, mailbox_ram: MailboxRam) -> Self {
         let mut result = Self {
+            boot_integrity: None,
             status: ReadOnlyRegister::new(Status::VALID::CLEAR.value),
             hash_lower: ReadOnlyMemory::new(),
             hash_upper: ReadOnlyMemory::new(),
@@ -187,6 +190,13 @@ impl Sha512AcceleratorRegs {
         if size != RvSize::Word {
             Err(BusError::LoadAccessFault)?
         }
+        if self
+            .boot_integrity
+            .as_ref()
+            .is_some_and(|state| state.borrow().measurement_busy())
+        {
+            return Ok(1);
+        }
 
         if self
             .state_machine
@@ -213,6 +223,13 @@ impl Sha512AcceleratorRegs {
         // Writes have to be Word aligned
         if size != RvSize::Word {
             Err(BusError::StoreAccessFault)?
+        }
+        if self
+            .boot_integrity
+            .as_ref()
+            .is_some_and(|state| state.borrow().measurement_busy())
+        {
+            return Err(BusError::StoreAccessFault);
         }
 
         let val_reg = InMemoryRegister::<u32, Lock::Register>::new(val);
@@ -572,6 +589,10 @@ impl Sha512Accelerator {
         Self {
             regs: Rc::new(RefCell::new(Sha512AcceleratorRegs::new(clock, mailbox_ram))),
         }
+    }
+
+    pub(crate) fn attach_boot_integrity(&mut self, state: SharedBootIntegrity) {
+        self.regs.borrow_mut().boot_integrity = Some(state);
     }
 }
 

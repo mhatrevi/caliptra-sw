@@ -1837,6 +1837,11 @@ pub trait HwModel: SocManager {
     fn mci(&mut self) -> caliptra_registers::mci::RegisterBlock<Self::TMmio<'_>> {
         panic!("mci unimplemented");
     }
+
+    /// Read a PCR through the model's debug interface, without executing firmware.
+    fn read_pcr(&mut self, _index: u8) -> [u8; 48] {
+        panic!("PCR debug reads are unsupported by this hardware model");
+    }
 }
 
 #[cfg(test)]

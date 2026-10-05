@@ -26,7 +26,7 @@ use caliptra_image_types::{FwVerificationPqcKeyType, ImageBundle, ImageSignData}
 use zerocopy::{FromBytes, IntoBytes};
 
 /// Re-sign the header after modifying the TOC entries, then return the image bytes.
-fn rebuild_image_after_toc_change(image_bundle: &mut ImageBundle) -> Vec<u8> {
+pub(super) fn rebuild_image_after_toc_change(image_bundle: &mut ImageBundle) -> Vec<u8> {
     let gen = ImageGenerator::new(Crypto::default());
 
     image_bundle.manifest.header.toc_digest = gen
@@ -483,7 +483,11 @@ fn test_update_reset_post_load_digest_mismatch_is_fatal() {
     hw.write_payload_to_ss_staging_area(&tampered_word, tamper_offset)
         .unwrap();
 
-    let expected_error = u32::from(CaliptraError::IMAGE_VERIFIER_ERR_RUNTIME_DIGEST_MISMATCH);
+    let expected_error = u32::from(if caliptra_registers::HAS_ICCM_WRITE_MEASUREMENT {
+        CaliptraError::ROM_ICCM_MEASUREMENT_MISMATCH
+    } else {
+        CaliptraError::IMAGE_VERIFIER_ERR_RUNTIME_DIGEST_MISMATCH
+    });
     hw.step_until(|model| {
         model.soc_ifc().cptra_fw_error_fatal().read() == expected_error
             && model.soc_ifc().cptra_fw_error_non_fatal().read() == expected_error

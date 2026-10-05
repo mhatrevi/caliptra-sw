@@ -134,6 +134,9 @@ impl ExtendPcrCmd {
                 PcrId::PcrId0 | PcrId::PcrId1 | PcrId::PcrId2 | PcrId::PcrId3 => {
                     return Err(CaliptraError::RUNTIME_PCR_RESERVED)
                 }
+                PcrId::PcrId4 | PcrId::PcrId5 if caliptra_registers::HAS_ICCM_WRITE_MEASUREMENT => {
+                    return Err(CaliptraError::RUNTIME_PCR_RESERVED)
+                }
                 pcr_id => pcr_id,
             };
 

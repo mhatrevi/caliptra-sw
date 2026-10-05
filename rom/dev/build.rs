@@ -65,9 +65,12 @@ fn main() {
         let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
         fs::write(out_dir.join("rom.ld"), include_bytes!("src/rom.ld")).unwrap();
 
-        let preprocessor_vars: Vec<_> = env::vars()
+        let mut preprocessor_vars: Vec<_> = env::vars()
             .filter(|(k, _)| k.starts_with("CARGO_"))
             .collect();
+        if caliptra_registers::HAS_ICCM_WRITE_MEASUREMENT {
+            preprocessor_vars.push(("CALIPTRA_HW_ICCM_MEASUREMENT".into(), "1".into()));
+        }
 
         std::fs::write(
             out_dir.join("start_preprocessed.S"),

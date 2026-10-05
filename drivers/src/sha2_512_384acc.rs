@@ -357,6 +357,15 @@ impl Sha2_512_384AccOp<'_> {
         Ok(())
     }
 
+    /// Feed dword-aligned captured bytes into an active streaming operation.
+    pub fn stream_update(&mut self, data: &[u8]) -> CaliptraResult<()> {
+        if !data.len().is_multiple_of(4) {
+            return Err(CaliptraError::DRIVER_SHA2_512_384ACC_INDEX_OUT_OF_BOUNDS);
+        }
+        self.write_data_to_datain(data);
+        Ok(())
+    }
+
     /// Execute and finish SHA accelerator streaming operation.
     pub fn stream_finish_384(&mut self, digest: Sha384Digest) -> CaliptraResult<()> {
         let sha_acc = self.sha512_acc.regs_mut();

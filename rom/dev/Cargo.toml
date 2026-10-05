@@ -31,6 +31,7 @@ memoffset.workspace = true
 
 [build-dependencies]
 caliptra-common = { workspace = true, default-features = false, features = ["std"] }
+caliptra-registers.workspace = true
 cfg-if.workspace = true
 const-gen.workspace = true
 hex.workspace = true

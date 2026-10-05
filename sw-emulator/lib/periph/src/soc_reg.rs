@@ -12,9 +12,11 @@ Abstract:
 
 --*/
 
+use crate::boot_integrity::SharedBootIntegrity;
 use crate::helpers::{bytes_from_words_be, words_from_bytes_be};
 use crate::mailbox::MailboxRequester;
 use crate::root_bus::ReadyForFwCbArgs;
+use crate::KeyVault;
 use crate::Mci;
 use crate::{CaliptraRootBusArgs, Iccm, MailboxInternal, StashMeasurementBank};
 use caliptra_emu_bus::BusError::{LoadAccessFault, StoreAccessFault};
@@ -460,7 +462,9 @@ impl SocRegistersInternal {
     }
 
     pub fn set_strap_generic(&mut self, val: &[u32; SS_STRAP_GENERIC_SIZE / 4]) {
-        self.regs.borrow_mut().ss_strap_generic = *val;
+        let mut regs = self.regs.borrow_mut();
+        regs.ss_strap_generic = *val;
+        regs.update_boot_integrity_straps();
     }
 
     pub fn external_regs(&self) -> SocRegistersExternal {
@@ -468,11 +472,29 @@ impl SocRegistersInternal {
             regs: self.regs.clone(),
         }
     }
+
+    pub(crate) fn attach_boot_integrity(&self, state: SharedBootIntegrity, vault: KeyVault) {
+        let mut regs = self.regs.borrow_mut();
+        regs.boot_integrity = Some(state);
+        regs.boot_key_vault = Some(vault);
+        regs.update_boot_integrity_straps();
+    }
+
+    pub(crate) fn entered_firmware(&self) -> bool {
+        self.regs
+            .borrow()
+            .boot_integrity
+            .as_ref()
+            .is_some_and(|state| state.borrow().entered_firmware())
+    }
 }
 
 impl Bus for SocRegistersInternal {
     /// Read data of specified size from given address
     fn read(&mut self, size: RvSize, addr: RvAddr) -> Result<RvData, BusError> {
+        if let Some(result) = self.regs.borrow_mut().read_boot_region(size, addr, false) {
+            return result;
+        }
         match addr {
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
                 self.regs.borrow_mut().read_register(size, addr)
@@ -483,6 +505,13 @@ impl Bus for SocRegistersInternal {
 
     /// Write data of specified size to given address
     fn write(&mut self, size: RvSize, addr: RvAddr, val: RvData) -> Result<(), BusError> {
+        if let Some(result) = self
+            .regs
+            .borrow_mut()
+            .write_boot_region(size, addr, val, false)
+        {
+            return result;
+        }
         match addr {
             FUSE_START_ADDR..=FUSE_END_ADDR => {
                 // Microcontroller can't ever write to fuse registers
@@ -547,6 +576,9 @@ pub struct SocRegistersExternal {
 impl Bus for SocRegistersExternal {
     /// Read data of specified size from given address
     fn read(&mut self, size: RvSize, addr: RvAddr) -> Result<RvData, BusError> {
+        if let Some(result) = self.regs.borrow_mut().read_boot_region(size, addr, true) {
+            return result;
+        }
         match addr {
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
                 self.regs.borrow_mut().read_register(size, addr)
@@ -557,6 +589,13 @@ impl Bus for SocRegistersExternal {
 
     /// Write data of specified size to given address
     fn write(&mut self, size: RvSize, addr: RvAddr, val: RvData) -> Result<(), BusError> {
+        if let Some(result) = self
+            .regs
+            .borrow_mut()
+            .write_boot_region(size, addr, val, true)
+        {
+            return result;
+        }
         match addr {
             FUSE_START_ADDR..=FUSE_END_ADDR => {
                 if self.regs.borrow_mut().fuses_can_be_written {
@@ -599,11 +638,13 @@ impl Bus for SocRegistersExternal {
 #[poll_fn(bus_poll)]
 struct SocRegistersImpl {
     hw_version: CaliptraHwVersion,
+    boot_integrity: Option<SharedBootIntegrity>,
+    boot_key_vault: Option<KeyVault>,
 
-    #[register(offset = 0x0000)]
+    #[register(offset = 0x0000, read_fn = on_read_hw_fatal, write_fn = on_write_hw_fatal)]
     cptra_hw_error_fatal: ReadWriteRegister<u32>,
 
-    #[register(offset = 0x0004)]
+    #[register(offset = 0x0004, read_fn = on_read_hw_non_fatal, write_fn = on_write_hw_non_fatal)]
     cptra_hw_error_non_fatal: ReadWriteRegister<u32>,
 
     #[register(offset = 0x0008)]
@@ -1049,6 +1090,8 @@ impl SocRegistersImpl {
 
         let regs = Self {
             hw_version: args.hw_version,
+            boot_integrity: None,
+            boot_key_vault: None,
             cptra_hw_error_fatal: ReadWriteRegister::new(0),
             cptra_hw_error_non_fatal: ReadWriteRegister::new(0),
             cptra_fw_error_fatal: ReadWriteRegister::new(0),
@@ -1200,6 +1243,89 @@ impl SocRegistersImpl {
             0x118..=0x11f => None,
             0x180..=0x187 => Some(addr - (0x180 - 0x118)),
             _ => Some(addr),
+        }
+    }
+
+    fn read_boot_region(
+        &mut self,
+        size: RvSize,
+        addr: RvAddr,
+        external: bool,
+    ) -> Option<Result<RvData, BusError>> {
+        let state = self.boot_integrity.as_ref()?;
+        if !state.borrow().is_region_address(addr) {
+            return None;
+        }
+        Some(state.borrow_mut().read_region(size, addr, external))
+    }
+
+    fn write_boot_region(
+        &mut self,
+        size: RvSize,
+        addr: RvAddr,
+        value: RvData,
+        external: bool,
+    ) -> Option<Result<(), BusError>> {
+        let state = self.boot_integrity.as_ref()?;
+        if !state.borrow().is_region_address(addr) {
+            return None;
+        }
+        Some(state.borrow_mut().write_region(size, addr, value, external))
+    }
+
+    fn on_read_hw_fatal(&mut self, size: RvSize) -> Result<RvData, BusError> {
+        let value = caliptra_emu_bus::Register::read(&self.cptra_hw_error_fatal, size)?;
+        Ok(value
+            | self
+                .boot_integrity
+                .as_ref()
+                .map_or(0, |state| state.borrow().fatal_error))
+    }
+
+    fn on_read_hw_non_fatal(&mut self, size: RvSize) -> Result<RvData, BusError> {
+        let value = caliptra_emu_bus::Register::read(&self.cptra_hw_error_non_fatal, size)?;
+        Ok(value
+            | self
+                .boot_integrity
+                .as_ref()
+                .map_or(0, |state| state.borrow().non_fatal_error))
+    }
+
+    fn on_write_hw_fatal(&mut self, size: RvSize, val: RvData) -> Result<(), BusError> {
+        if size != RvSize::Word {
+            return Err(StoreAccessFault);
+        }
+        if self.hw_version == CaliptraHwVersion::V2_2 {
+            if let Some(state) = &self.boot_integrity {
+                state.borrow_mut().fatal_error &= !val;
+            }
+            self.cptra_hw_error_fatal
+                .write(size, self.cptra_hw_error_fatal.reg.get() & !val)
+        } else {
+            self.cptra_hw_error_fatal.write(size, val)
+        }
+    }
+
+    fn on_write_hw_non_fatal(&mut self, size: RvSize, val: RvData) -> Result<(), BusError> {
+        if size != RvSize::Word {
+            return Err(StoreAccessFault);
+        }
+        if self.hw_version == CaliptraHwVersion::V2_2 {
+            if let Some(state) = &self.boot_integrity {
+                state.borrow_mut().non_fatal_error &= !val;
+            }
+            self.cptra_hw_error_non_fatal
+                .write(size, self.cptra_hw_error_non_fatal.reg.get() & !val)
+        } else {
+            self.cptra_hw_error_non_fatal.write(size, val)
+        }
+    }
+
+    fn update_boot_integrity_straps(&mut self) {
+        if let Some(state) = &self.boot_integrity {
+            let mut state = state.borrow_mut();
+            state.stable_owner =
+                state.measurement_enabled() && self.ss_strap_generic[3] & 1 != 0 && !state.ocp_lock;
         }
     }
 
@@ -1357,9 +1483,14 @@ impl SocRegistersImpl {
     }
 
     fn on_write_iccm_lock(&mut self, size: RvSize, val: RvData) -> Result<(), BusError> {
+        if size != RvSize::Word {
+            return Err(StoreAccessFault);
+        }
         let iccm_lock_reg = InMemoryRegister::<u32, IccmLock::Register>::new(val);
         if iccm_lock_reg.is_set(IccmLock::LOCK) {
-            self.iccm.lock();
+            self.iccm.lock()?;
+        } else if self.hw_version == CaliptraHwVersion::V2_2 {
+            return Ok(());
         } else {
             self.iccm.unlock();
         }
@@ -1538,6 +1669,7 @@ impl SocRegistersImpl {
         val: RvData,
     ) -> Result<(), BusError> {
         self.ss_strap_generic[index] = val;
+        self.update_boot_integrity_straps();
         Ok(())
     }
 
@@ -1566,6 +1698,9 @@ impl SocRegistersImpl {
     fn reset_common(&mut self) {
         // Unlock the ICCM.
         self.iccm.unlock();
+        if self.hw_version == CaliptraHwVersion::V2_2 {
+            self.internal_iccm_lock.reg.set(0);
+        }
     }
 
     /// Called by Bus::poll() to indicate that time has passed
@@ -1690,6 +1825,7 @@ impl SocRegistersImpl {
         }
 
         self.reset_common();
+        self.reset_boot_integrity(false);
     }
 
     /// Called by Bus::update_reset() to indicate an update reset
@@ -1703,6 +1839,20 @@ impl SocRegistersImpl {
             .write(ResetReason::FW_UPD_RESET::SET);
 
         self.reset_common();
+        self.reset_boot_integrity(true);
+    }
+
+    fn reset_boot_integrity(&mut self, update: bool) {
+        if let Some(state) = &self.boot_integrity {
+            state.borrow_mut().reset(update);
+            if update && state.borrow().measurement_enabled() {
+                if let Some(vault) = &mut self.boot_key_vault {
+                    vault
+                        .write_hardware_pcr(4, &[0; 48])
+                        .expect("valid hardware PCR index");
+                }
+            }
+        }
     }
 }
 
@@ -1783,6 +1933,92 @@ mod tests {
     };
     use tock_registers::{interfaces::ReadWriteable, registers::InMemoryRegister};
     use zerocopy::IntoBytes;
+
+    #[test]
+    fn test_boot_integrity_register_routing_and_strap_gating() {
+        for hw_version in [CaliptraHwVersion::V2_1, CaliptraHwVersion::V2_2] {
+            for subsystem_mode in [false, true] {
+                for ocp_lock_en in [false, true] {
+                    let clock = Rc::new(Clock::new());
+                    let mailbox = MailboxInternal::new(&clock, MailboxRam::default());
+                    let state = crate::boot_integrity::BootIntegrity::new(
+                        hw_version,
+                        subsystem_mode,
+                        true,
+                        false,
+                        ocp_lock_en,
+                    );
+                    let args = CaliptraRootBusArgs {
+                        hw_version,
+                        subsystem_mode,
+                        ocp_lock_en,
+                        clock: clock.clone(),
+                        ..Default::default()
+                    };
+                    let mut caliptra_reg = SocRegistersInternal::new(
+                        mailbox,
+                        Iccm::new(&clock),
+                        Mci::new(vec![]),
+                        args,
+                    );
+                    caliptra_reg.set_strap_generic(&[0, 0, 0, 1]);
+                    caliptra_reg.attach_boot_integrity(state.clone(), KeyVault::new());
+                    let mut soc_reg = caliptra_reg.external_regs();
+                    let stable_owner =
+                        hw_version == CaliptraHwVersion::V2_2 && subsystem_mode && !ocp_lock_en;
+                    assert_eq!(state.borrow().stable_owner, stable_owner);
+                    soc_reg.write(RvSize::Word, 0x5ac, 0).unwrap();
+                    assert!(!state.borrow().stable_owner);
+                    soc_reg.write(RvSize::Word, 0x5ac, 1).unwrap();
+                    assert_eq!(state.borrow().stable_owner, stable_owner);
+
+                    if hw_version == CaliptraHwVersion::V2_1 {
+                        assert_eq!(caliptra_reg.read(RvSize::Word, 0x650), Err(LoadAccessFault));
+                        assert_eq!(soc_reg.write(RvSize::Word, 0x650, 1), Err(StoreAccessFault));
+                        continue;
+                    }
+                    for _ in 0..2 {
+                        soc_reg.write(RvSize::Word, 0x650, 0x100).unwrap();
+                    }
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0x650), Ok(0));
+                    for _ in 0..2 {
+                        caliptra_reg.write(RvSize::Word, 0x650, 0x100).unwrap();
+                    }
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0x650), Ok(0x100));
+                    assert_eq!(soc_reg.read(RvSize::Word, 0x650), Ok(0));
+                    caliptra_reg.write(RvSize::Word, 0x654, 0x1000).unwrap();
+                    caliptra_reg.write(RvSize::Word, 0x654, 0x2000).unwrap();
+                    assert_eq!(soc_reg.read(RvSize::Word, 4), Ok(1 << 3));
+                    soc_reg.write(RvSize::Word, 4, 1 << 3).unwrap();
+                    assert_eq!(soc_reg.read(RvSize::Word, 4), Ok(0));
+                    state.borrow_mut().observe_read(0);
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0), Ok(1 << 4));
+                    assert_eq!(soc_reg.read(RvSize::Word, 0), Ok(1 << 4));
+                    caliptra_reg.write(RvSize::Word, 0x620, 1).unwrap();
+                    caliptra_reg.write(RvSize::Word, 0x620, 0).unwrap();
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0x620), Ok(1));
+                    caliptra_reg.warm_reset();
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0x620), Ok(0));
+                    assert_eq!(caliptra_reg.read(RvSize::Word, 0x660), Ok(0));
+                    assert_eq!(soc_reg.read(RvSize::Word, 0), Ok(1 << 4));
+                    soc_reg.write(RvSize::Word, 0, 1 << 4).unwrap();
+                    assert_eq!(soc_reg.read(RvSize::Word, 0), Ok(0));
+                    for (index, value) in [0, 0xfff, 0x9000, 0x9fff].into_iter().enumerate() {
+                        for _ in 0..2 {
+                            caliptra_reg
+                                .write(RvSize::Word, 0x650 + index as u32 * 4, value)
+                                .unwrap();
+                        }
+                    }
+                    caliptra_reg.write(RvSize::Word, 0x660, 1).unwrap();
+                    assert_eq!(
+                        state.borrow_mut().observe_read(0),
+                        Some(crate::boot_integrity::BootTransition::Fmc)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_entropy_configuration_offsets_by_version() {

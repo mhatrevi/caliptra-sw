@@ -202,6 +202,25 @@ impl FirmwareProcessor {
         });
         let info = okref(&info)?;
 
+        let expected_iccm = {
+            let source = if let Some(ref txn) = txn {
+                caliptra_common::verifier::ImageSource::MboxMemory(txn.raw_mailbox_contents())
+            } else {
+                caliptra_common::verifier::ImageSource::Axi {
+                    dma: &env.dma,
+                    axi_start: AxiAddr::from(mci_base + caliptra_drivers::dma::MCU_SRAM_OFFSET),
+                }
+            };
+            crate::flow::loaded_image::prepare_iccm_measurement(
+                manifest,
+                &source,
+                true,
+                &env.soc_ifc,
+                &mut env.sha2_512_384,
+                &mut env.sha2_512_384_acc,
+            )?
+        };
+
         Self::update_fuse_log(
             &mut env.persistent_data.get_mut().rom.fuse_log,
             &info.log_info,
@@ -219,9 +238,17 @@ impl FirmwareProcessor {
         )?;
         report_boot_status(FwProcessorExtendPcrComplete.into());
 
-        // Load the image, then verify the loaded ICCM contents against the manifest in DCCM.
         Self::load_image(manifest, txn.as_deref_mut(), &mut env.soc_ifc, &mut env.dma)?;
-        crate::flow::loaded_image::verify_fmc_and_runtime(manifest, &mut env.sha2_512_384)?;
+        if let Some(expected) = expected_iccm {
+            crate::flow::loaded_image::verify_iccm_measurement(
+                &expected,
+                &mut env.soc_ifc,
+                &mut env.sha2_512_384_acc,
+                &env.pcr_bank,
+            )?;
+        } else {
+            crate::flow::loaded_image::verify_fmc_and_runtime(manifest, &mut env.sha2_512_384)?;
+        }
 
         // Complete the mailbox transaction indicating success.
         if let Some(ref mut txn) = txn {

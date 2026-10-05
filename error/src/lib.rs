@@ -2158,6 +2158,16 @@ impl CaliptraError {
             "TRNG_EXT Error: Update not supported"
         ),
         (
+            DRIVER_SOC_IFC_INVALID_ICCM_REGION,
+            0x00100004,
+            "SOC_IFC driver Error: Invalid ICCM boot region"
+        ),
+        (
+            DRIVER_SOC_IFC_ICCM_REGION_COMMIT_FAILURE,
+            0x00100005,
+            "SOC_IFC driver Error: ICCM boot region commit failed"
+        ),
+        (
             ADDRESS_MISALIGNED,
             0x00110000,
             "Bounded address Error: Misaligned"
@@ -2483,6 +2493,21 @@ impl CaliptraError {
             ROM_INVALID_ROM_PERSISTENT_DATA_VERSION,
             0x01050012,
             "ROM Error: Invalid ROM persistent data version"
+        ),
+        (
+            ROM_ICCM_MEASUREMENT_UNSUPPORTED,
+            0x01050013,
+            "ROM Error: ICCM measurement unavailable for production passive mode"
+        ),
+        (
+            ROM_ICCM_MEASUREMENT_MISMATCH,
+            0x01050014,
+            "ROM Error: Hardware ICCM write measurement mismatch"
+        ),
+        (
+            ROM_ICCM_MEASUREMENT_TIMEOUT,
+            0x01050015,
+            "ROM Error: Hardware ICCM write measurement did not complete"
         ),
         (
             KAT_SHA256_DIGEST_FAILURE,
