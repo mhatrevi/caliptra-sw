@@ -14,11 +14,11 @@
 /// programs create one of these in unsafe code near the top of
 /// main(), and pass it to the driver responsible for managing
 /// all access to the hardware.
-pub struct DoeReg {
+pub struct EntropyCombinerReg {
     _priv: (),
 }
-impl DoeReg {
-    pub const PTR: *mut u32 = 0x10000000 as *mut u32;
+impl EntropyCombinerReg {
+    pub const PTR: *mut u32 = 0x20005000 as *mut u32;
     /// # Safety
     ///
     /// Caller must ensure that all concurrent use of this
@@ -78,13 +78,16 @@ impl<TMmio: caliptra_ureg::Mmio> RegisterBlock<TMmio> {
     pub unsafe fn new_with_mmio(ptr: *mut u32, mmio: TMmio) -> Self {
         Self { ptr, mmio }
     }
-    /// 4 32-bit registers storing the 128-bit IV.
+    /// Two 32-bit read-only words identifying the entropy combiner.
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn iv(
+    pub fn combiner_name(
         &self,
-    ) -> caliptra_ureg::Array<4, caliptra_ureg::RegRef<crate::doe::meta::Iv, &TMmio>> {
+    ) -> caliptra_ureg::Array<
+        2,
+        caliptra_ureg::RegRef<crate::entropy_combiner::meta::CombinerName, &TMmio>,
+    > {
         unsafe {
             caliptra_ureg::Array::new_with_mmio(
                 self.ptr.wrapping_add(0 / core::mem::size_of::<u32>()),
@@ -92,11 +95,30 @@ impl<TMmio: caliptra_ureg::Mmio> RegisterBlock<TMmio> {
             )
         }
     }
-    /// Controls the de-obfuscation command to run
+    /// Two 32-bit read-only words identifying the entropy combiner version.
     ///
-    /// Read value: [`doe::regs::CtrlReadVal`]; Write value: [`doe::regs::CtrlWriteVal`]
+    /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn ctrl(&self) -> caliptra_ureg::RegRef<crate::doe::meta::Ctrl, &TMmio> {
+    pub fn combiner_version(
+        &self,
+    ) -> caliptra_ureg::Array<
+        2,
+        caliptra_ureg::RegRef<crate::entropy_combiner::meta::CombinerVersion, &TMmio>,
+    > {
+        unsafe {
+            caliptra_ureg::Array::new_with_mmio(
+                self.ptr.wrapping_add(8 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Controls the purpose-built SHA3-384 single-block KAT.
+    ///
+    /// Read value: [`entropy_combiner::regs::KatCtrlReadVal`]; Write value: [`entropy_combiner::regs::KatCtrlWriteVal`]
+    #[inline(always)]
+    pub fn kat_ctrl(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::KatCtrl, &TMmio> {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x10 / core::mem::size_of::<u32>()),
@@ -104,11 +126,13 @@ impl<TMmio: caliptra_ureg::Mmio> RegisterBlock<TMmio> {
             )
         }
     }
-    /// Provides status of the DOE block and the status of the flows it runs
+    /// Message length in bytes for the purpose-built single-block KAT. ROM is trusted to program a multiple of 8 in 0..96 bytes so the KAT remains within the 768-bit window.
     ///
-    /// Read value: [`doe::regs::StatusReadVal`]; Write value: [`doe::regs::StatusWriteVal`]
+    /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn status(&self) -> caliptra_ureg::RegRef<crate::doe::meta::Status, &TMmio> {
+    pub fn kat_msg_len(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::KatMsgLen, &TMmio> {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x14 / core::mem::size_of::<u32>()),
@@ -116,10 +140,100 @@ impl<TMmio: caliptra_ureg::Mmio> RegisterBlock<TMmio> {
             )
         }
     }
+    /// Status for the purpose-built KAT path. Fields reflect the real combiner FSM and ot_sha3 error/FSM signals.
+    ///
+    /// Read value: [`entropy_combiner::regs::KatStatusReadVal`]; Write value: [`entropy_combiner::regs::KatStatusWriteVal`]
+    #[inline(always)]
+    pub fn kat_status(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::KatStatus, &TMmio> {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0x18 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Twenty-four 32-bit words containing the bounded 768-bit KAT message window written by ROM and snapped by hardware on KAT start.
+    ///
+    /// Read value: [`u32`]; Write value: [`u32`]
+    #[inline(always)]
+    pub fn kat_msg(
+        &self,
+    ) -> caliptra_ureg::Array<
+        24,
+        caliptra_ureg::RegRef<crate::entropy_combiner::meta::KatMsg, &TMmio>,
+    > {
+        unsafe {
+            caliptra_ureg::Array::new_with_mmio(
+                self.ptr.wrapping_add(0x1c / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Twelve 32-bit read-only words containing the 384-bit SHA3-384 KAT digest written by hardware.
+    ///
+    /// Read value: [`u32`]; Write value: [`u32`]
+    #[inline(always)]
+    pub fn kat_digest(
+        &self,
+    ) -> caliptra_ureg::Array<
+        12,
+        caliptra_ureg::RegRef<crate::entropy_combiner::meta::KatDigest, &TMmio>,
+    > {
+        unsafe {
+            caliptra_ureg::Array::new_with_mmio(
+                self.ptr.wrapping_add(0x7c / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Controls entropy combiner policy fields. Reset default for es_fips_policy is AND_OF_BOTH_ES.
+    ///
+    /// Read value: [`entropy_combiner::regs::CombinerCtrlReadVal`]; Write value: [`entropy_combiner::regs::CombinerCtrlWriteVal`]
+    #[inline(always)]
+    pub fn combiner_ctrl(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::CombinerCtrl, &TMmio> {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0xac / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// MuBi4 AHB lock. MuBi4False(0x9)=unlocked (reset), MuBi4True(0x6)=locked; ROM writes MuBi4True after the KAT. Write-once-sticky (swwe=strict-False); clears only on reset. RTL treats any non-strict-False code (True or invalid) as locked (fail-safe).
+    ///
+    /// Read value: [`entropy_combiner::regs::AhbLockReadVal`]; Write value: [`entropy_combiner::regs::AhbLockWriteVal`]
+    #[inline(always)]
+    pub fn ahb_lock(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::AhbLock, &TMmio> {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0xb0 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Read-only hardware status. combine_en reflects the combine_en_i strap sampled by hardware, letting ROM/SW discover the entropy-source topology (two entropy sources vs one).
+    ///
+    /// Read value: [`entropy_combiner::regs::CombinerStatusReadVal`]; Write value: [`entropy_combiner::regs::CombinerStatusWriteVal`]
+    #[inline(always)]
+    pub fn combiner_status(
+        &self,
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::CombinerStatus, &TMmio> {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0xb4 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
     #[inline(always)]
     pub fn intr_block_rf(&self) -> IntrBlockRfBlock<&TMmio> {
         IntrBlockRfBlock {
-            ptr: unsafe { self.ptr.add(0x800 / core::mem::size_of::<u32>()) },
+            ptr: unsafe { self.ptr.add(0x400 / core::mem::size_of::<u32>()) },
             mmio: core::borrow::Borrow::borrow(&self.mmio),
         }
     }
@@ -136,7 +250,8 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     #[inline(always)]
     pub fn global_intr_en_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfGlobalIntrEnR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfGlobalIntrEnR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0 / core::mem::size_of::<u32>()),
@@ -146,11 +261,11 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     }
     /// Dedicated register with one bit for each event that may produce an interrupt.
     ///
-    /// Read value: [`doe::regs::ErrorIntrEnTReadVal`]; Write value: [`doe::regs::ErrorIntrEnTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::ErrorIntrEnTReadVal`]; Write value: [`entropy_combiner::regs::ErrorIntrEnTWriteVal`]
     #[inline(always)]
     pub fn error_intr_en_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfErrorIntrEnR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfErrorIntrEnR, &TMmio> {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(4 / core::mem::size_of::<u32>()),
@@ -160,11 +275,11 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     }
     /// Dedicated register with one bit for each event that may produce an interrupt.
     ///
-    /// Read value: [`sha512_acc::regs::NotifIntrEnTReadVal`]; Write value: [`sha512_acc::regs::NotifIntrEnTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::NotifIntrEnTReadVal`]; Write value: [`entropy_combiner::regs::NotifIntrEnTWriteVal`]
     #[inline(always)]
     pub fn notif_intr_en_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifIntrEnR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfNotifIntrEnR, &TMmio> {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(8 / core::mem::size_of::<u32>()),
@@ -173,20 +288,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Single bit indicating occurrence of any interrupt event
-    /// of a given type. E.g. Notifications and Errors may drive
-    /// to two separate interrupt registers. There may be
-    /// multiple sources of Notifications or Errors that are
-    /// aggregated into a single interrupt pin for that
-    /// respective type. That pin feeds through this register
-    /// in order to apply a global enablement of that interrupt
-    /// event type.
-    /// Nonsticky assertion.
+    /// of a given type. Non-sticky assertion.
     ///
     /// Read value: [`sha512_acc::regs::GlobalIntrTReadVal`]; Write value: [`sha512_acc::regs::GlobalIntrTWriteVal`]
     #[inline(always)]
     pub fn error_global_intr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfErrorGlobalIntrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfErrorGlobalIntrR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0xc / core::mem::size_of::<u32>()),
@@ -195,20 +304,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Single bit indicating occurrence of any interrupt event
-    /// of a given type. E.g. Notifications and Errors may drive
-    /// to two separate interrupt registers. There may be
-    /// multiple sources of Notifications or Errors that are
-    /// aggregated into a single interrupt pin for that
-    /// respective type. That pin feeds through this register
-    /// in order to apply a global enablement of that interrupt
-    /// event type.
-    /// Nonsticky assertion.
+    /// of a given type. Non-sticky assertion.
     ///
     /// Read value: [`sha512_acc::regs::GlobalIntrTReadVal`]; Write value: [`sha512_acc::regs::GlobalIntrTWriteVal`]
     #[inline(always)]
     pub fn notif_global_intr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifGlobalIntrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfNotifGlobalIntrR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x10 / core::mem::size_of::<u32>()),
@@ -219,11 +322,12 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     /// Single bit indicating occurrence of each interrupt event.
     /// Sticky, level assertion, write-1-to-clear.
     ///
-    /// Read value: [`doe::regs::ErrorIntrTReadVal`]; Write value: [`doe::regs::ErrorIntrTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::ErrorIntrTReadVal`]; Write value: [`entropy_combiner::regs::ErrorIntrTWriteVal`]
     #[inline(always)]
     pub fn error_internal_intr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfErrorInternalIntrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfErrorInternalIntrR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x14 / core::mem::size_of::<u32>()),
@@ -234,11 +338,12 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     /// Single bit indicating occurrence of each interrupt event.
     /// Sticky, level assertion, write-1-to-clear.
     ///
-    /// Read value: [`sha512_acc::regs::NotifIntrTReadVal`]; Write value: [`sha512_acc::regs::NotifIntrTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::NotifIntrTReadVal`]; Write value: [`entropy_combiner::regs::NotifIntrTWriteVal`]
     #[inline(always)]
     pub fn notif_internal_intr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifInternalIntrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfNotifInternalIntrR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x18 / core::mem::size_of::<u32>()),
@@ -248,15 +353,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     }
     /// Single bit for each interrupt event allows SW to manually
     /// trigger occurrence of that event. Upon SW write, the trigger bit
-    /// will pulse for 1 cycle then clear to 0. The pulse on the
-    /// trigger register bit results in the corresponding interrupt
-    /// status bit being set to 1.
+    /// will pulse for 1 cycle then clear to 0.
     ///
-    /// Read value: [`doe::regs::ErrorIntrTrigTReadVal`]; Write value: [`doe::regs::ErrorIntrTrigTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::ErrorIntrTrigTReadVal`]; Write value: [`entropy_combiner::regs::ErrorIntrTrigTWriteVal`]
     #[inline(always)]
     pub fn error_intr_trig_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfErrorIntrTrigR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfErrorIntrTrigR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x1c / core::mem::size_of::<u32>()),
@@ -266,15 +370,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
     }
     /// Single bit for each interrupt event allows SW to manually
     /// trigger occurrence of that event. Upon SW write, the trigger bit
-    /// will pulse for 1 cycle then clear to 0. The pulse on the
-    /// trigger register bit results in the corresponding interrupt
-    /// status bit being set to 1.
+    /// will pulse for 1 cycle then clear to 0.
     ///
-    /// Read value: [`sha512_acc::regs::NotifIntrTrigTReadVal`]; Write value: [`sha512_acc::regs::NotifIntrTrigTWriteVal`]
+    /// Read value: [`entropy_combiner::regs::NotifIntrTrigTReadVal`]; Write value: [`entropy_combiner::regs::NotifIntrTrigTWriteVal`]
     #[inline(always)]
     pub fn notif_intr_trig_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifIntrTrigR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfNotifIntrTrigR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x20 / core::mem::size_of::<u32>()),
@@ -283,14 +386,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Provides statistics about the number of events that have
-    /// occurred.
-    /// Will not overflow ('incrsaturate').
+    /// occurred. Will not overflow ('incrsaturate').
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn error0_intr_count_r(
+    pub fn sha3_error_intr_count_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError0IntrCountR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfSha3ErrorIntrCountR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x100 / core::mem::size_of::<u32>()),
@@ -299,14 +402,16 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Provides statistics about the number of events that have
-    /// occurred.
-    /// Will not overflow ('incrsaturate').
+    /// occurred. Will not overflow ('incrsaturate').
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn error1_intr_count_r(
+    pub fn sparse_fsm_error_intr_count_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError1IntrCountR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfSparseFsmErrorIntrCountR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x104 / core::mem::size_of::<u32>()),
@@ -315,14 +420,14 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Provides statistics about the number of events that have
-    /// occurred.
-    /// Will not overflow ('incrsaturate').
+    /// occurred. Will not overflow ('incrsaturate').
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn error2_intr_count_r(
+    pub fn count_error_intr_count_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError2IntrCountR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<crate::entropy_combiner::meta::IntrBlockRfCountErrorIntrCountR, &TMmio>
+    {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x108 / core::mem::size_of::<u32>()),
@@ -331,14 +436,16 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Provides statistics about the number of events that have
-    /// occurred.
-    /// Will not overflow ('incrsaturate').
+    /// occurred. Will not overflow ('incrsaturate').
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn error3_intr_count_r(
+    pub fn storage_rst_error_intr_count_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError3IntrCountR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfStorageRstErrorIntrCountR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x10c / core::mem::size_of::<u32>()),
@@ -347,14 +454,34 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
         }
     }
     /// Provides statistics about the number of events that have
-    /// occurred.
-    /// Will not overflow ('incrsaturate').
+    /// occurred. Will not overflow ('incrsaturate').
     ///
     /// Read value: [`u32`]; Write value: [`u32`]
     #[inline(always)]
-    pub fn notif_cmd_done_intr_count_r(
+    pub fn combiner_fsm_error_intr_count_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifCmdDoneIntrCountR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfCombinerFsmErrorIntrCountR,
+        &TMmio,
+    > {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0x110 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Provides statistics about the number of events that have
+    /// occurred. Will not overflow ('incrsaturate').
+    ///
+    /// Read value: [`u32`]; Write value: [`u32`]
+    #[inline(always)]
+    pub fn notif_kat_done_intr_count_r(
+        &self,
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfNotifKatDoneIntrCountR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x180 / core::mem::size_of::<u32>()),
@@ -362,20 +489,19 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
             )
         }
     }
-    /// Trigger the event counter to increment based on observing
-    /// the rising edge of an interrupt event input from the
-    /// Hardware. The same input signal that causes an interrupt
-    /// event to be set (sticky) also causes this signal to pulse
-    /// for 1 clock cycle, resulting in the event counter
-    /// incrementing by 1 for every interrupt event.
-    /// This is implemented as a down-counter (1-bit) that will
-    /// decrement immediately on being set - resulting in a pulse
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
     ///
     /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
     #[inline(always)]
-    pub fn error0_intr_count_incr_r(
+    pub fn sha3_error_intr_count_incr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError0IntrCountIncrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfSha3ErrorIntrCountIncrR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x200 / core::mem::size_of::<u32>()),
@@ -383,20 +509,19 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
             )
         }
     }
-    /// Trigger the event counter to increment based on observing
-    /// the rising edge of an interrupt event input from the
-    /// Hardware. The same input signal that causes an interrupt
-    /// event to be set (sticky) also causes this signal to pulse
-    /// for 1 clock cycle, resulting in the event counter
-    /// incrementing by 1 for every interrupt event.
-    /// This is implemented as a down-counter (1-bit) that will
-    /// decrement immediately on being set - resulting in a pulse
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
     ///
     /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
     #[inline(always)]
-    pub fn error1_intr_count_incr_r(
+    pub fn sparse_fsm_error_intr_count_incr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError1IntrCountIncrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfSparseFsmErrorIntrCountIncrR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x204 / core::mem::size_of::<u32>()),
@@ -404,20 +529,19 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
             )
         }
     }
-    /// Trigger the event counter to increment based on observing
-    /// the rising edge of an interrupt event input from the
-    /// Hardware. The same input signal that causes an interrupt
-    /// event to be set (sticky) also causes this signal to pulse
-    /// for 1 clock cycle, resulting in the event counter
-    /// incrementing by 1 for every interrupt event.
-    /// This is implemented as a down-counter (1-bit) that will
-    /// decrement immediately on being set - resulting in a pulse
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
     ///
     /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
     #[inline(always)]
-    pub fn error2_intr_count_incr_r(
+    pub fn count_error_intr_count_incr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError2IntrCountIncrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfCountErrorIntrCountIncrR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x208 / core::mem::size_of::<u32>()),
@@ -425,20 +549,19 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
             )
         }
     }
-    /// Trigger the event counter to increment based on observing
-    /// the rising edge of an interrupt event input from the
-    /// Hardware. The same input signal that causes an interrupt
-    /// event to be set (sticky) also causes this signal to pulse
-    /// for 1 clock cycle, resulting in the event counter
-    /// incrementing by 1 for every interrupt event.
-    /// This is implemented as a down-counter (1-bit) that will
-    /// decrement immediately on being set - resulting in a pulse
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
     ///
     /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
     #[inline(always)]
-    pub fn error3_intr_count_incr_r(
+    pub fn storage_rst_error_intr_count_incr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfError3IntrCountIncrR, &TMmio> {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfStorageRstErrorIntrCountIncrR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x20c / core::mem::size_of::<u32>()),
@@ -446,24 +569,42 @@ impl<TMmio: caliptra_ureg::Mmio> IntrBlockRfBlock<TMmio> {
             )
         }
     }
-    /// Trigger the event counter to increment based on observing
-    /// the rising edge of an interrupt event input from the
-    /// Hardware. The same input signal that causes an interrupt
-    /// event to be set (sticky) also causes this signal to pulse
-    /// for 1 clock cycle, resulting in the event counter
-    /// incrementing by 1 for every interrupt event.
-    /// This is implemented as a down-counter (1-bit) that will
-    /// decrement immediately on being set - resulting in a pulse
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
     ///
     /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
     #[inline(always)]
-    pub fn notif_cmd_done_intr_count_incr_r(
+    pub fn combiner_fsm_error_intr_count_incr_r(
         &self,
-    ) -> caliptra_ureg::RegRef<crate::doe::meta::IntrBlockRfNotifCmdDoneIntrCountIncrR, &TMmio>
-    {
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfCombinerFsmErrorIntrCountIncrR,
+        &TMmio,
+    > {
         unsafe {
             caliptra_ureg::RegRef::new_with_mmio(
                 self.ptr.wrapping_add(0x210 / core::mem::size_of::<u32>()),
+                core::borrow::Borrow::borrow(&self.mmio),
+            )
+        }
+    }
+    /// Trigger the event counter to increment based on observing the
+    /// rising edge of an interrupt event input from the hardware.
+    /// Implemented as a 1-bit down-counter that decrements immediately
+    /// on being set, producing a pulse.
+    ///
+    /// Read value: [`sha512_acc::regs::IntrCountIncrTReadVal`]; Write value: [`sha512_acc::regs::IntrCountIncrTWriteVal`]
+    #[inline(always)]
+    pub fn notif_kat_done_intr_count_incr_r(
+        &self,
+    ) -> caliptra_ureg::RegRef<
+        crate::entropy_combiner::meta::IntrBlockRfNotifKatDoneIntrCountIncrR,
+        &TMmio,
+    > {
+        unsafe {
+            caliptra_ureg::RegRef::new_with_mmio(
+                self.ptr.wrapping_add(0x214 / core::mem::size_of::<u32>()),
                 core::borrow::Borrow::borrow(&self.mmio),
             )
         }
@@ -478,7 +619,7 @@ pub struct IntrBlockRf {
     _priv: (),
 }
 impl IntrBlockRf {
-    pub const PTR: *mut u32 = 0x800 as *mut u32;
+    pub const PTR: *mut u32 = 0x400 as *mut u32;
     /// # Safety
     ///
     /// Caller must ensure that all concurrent use of this
@@ -511,157 +652,204 @@ impl IntrBlockRf {
 pub mod regs {
     //! Types that represent the values held by registers.
     #[derive(Clone, Copy)]
-    pub struct CtrlReadVal(u32);
-    impl CtrlReadVal {
-        /// Indicates the command for DOE to run. Additional command encodings in the CMD_EXT field are combined with this field to define the full command.
+    pub struct AhbLockReadVal(u32);
+    impl AhbLockReadVal {
+        /// MuBi4 AHB lock: 0x9=unlocked, 0x6=locked; any non-strict-False code is locked.
         #[inline(always)]
-        pub fn cmd(&self) -> super::enums::DoeCmdE {
-            super::enums::DoeCmdE::try_from((self.0 >> 0) & 3).unwrap()
-        }
-        /// Key Vault entry to store the result.
-        #[inline(always)]
-        pub fn dest(&self) -> u32 {
-            (self.0 >> 2) & 0x1f
-        }
-        /// Additional encoding bits for DOE command to run
-        #[inline(always)]
-        pub fn cmd_ext(&self) -> super::enums::DoeCmdExtE {
-            super::enums::DoeCmdExtE::try_from((self.0 >> 7) & 3).unwrap()
+        pub fn lock(&self) -> u32 {
+            (self.0 >> 0) & 0xf
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
         #[inline(always)]
-        pub fn modify(self) -> CtrlWriteVal {
-            CtrlWriteVal(self.0)
+        pub fn modify(self) -> AhbLockWriteVal {
+            AhbLockWriteVal(self.0)
         }
     }
-    impl From<u32> for CtrlReadVal {
+    impl From<u32> for AhbLockReadVal {
         #[inline(always)]
         fn from(val: u32) -> Self {
             Self(val)
         }
     }
-    impl From<CtrlReadVal> for u32 {
+    impl From<AhbLockReadVal> for u32 {
         #[inline(always)]
-        fn from(val: CtrlReadVal) -> u32 {
+        fn from(val: AhbLockReadVal) -> u32 {
             val.0
         }
     }
     #[derive(Clone, Copy)]
-    pub struct CtrlWriteVal(u32);
-    impl CtrlWriteVal {
-        /// Indicates the command for DOE to run. Additional command encodings in the CMD_EXT field are combined with this field to define the full command.
+    pub struct AhbLockWriteVal(u32);
+    impl AhbLockWriteVal {
+        /// MuBi4 AHB lock: 0x9=unlocked, 0x6=locked; any non-strict-False code is locked.
         #[inline(always)]
-        pub fn cmd(
-            self,
-            f: impl FnOnce(super::enums::selector::DoeCmdESelector) -> super::enums::DoeCmdE,
-        ) -> Self {
-            Self(
-                (self.0 & !(3 << 0))
-                    | (u32::from(f(super::enums::selector::DoeCmdESelector())) << 0),
-            )
-        }
-        /// Key Vault entry to store the result.
-        #[inline(always)]
-        pub fn dest(self, val: u32) -> Self {
-            Self((self.0 & !(0x1f << 2)) | ((val & 0x1f) << 2))
-        }
-        /// Additional encoding bits for DOE command to run
-        #[inline(always)]
-        pub fn cmd_ext(
-            self,
-            f: impl FnOnce(super::enums::selector::DoeCmdExtESelector) -> super::enums::DoeCmdExtE,
-        ) -> Self {
-            Self(
-                (self.0 & !(3 << 7))
-                    | (u32::from(f(super::enums::selector::DoeCmdExtESelector())) << 7),
-            )
+        pub fn lock(self, val: u32) -> Self {
+            Self((self.0 & !(0xf << 0)) | ((val & 0xf) << 0))
         }
     }
-    impl From<u32> for CtrlWriteVal {
+    impl From<u32> for AhbLockWriteVal {
         #[inline(always)]
         fn from(val: u32) -> Self {
             Self(val)
         }
     }
-    impl From<CtrlWriteVal> for u32 {
+    impl From<AhbLockWriteVal> for u32 {
         #[inline(always)]
-        fn from(val: CtrlWriteVal) -> u32 {
+        fn from(val: AhbLockWriteVal) -> u32 {
             val.0
         }
     }
     #[derive(Clone, Copy)]
-    pub struct StatusReadVal(u32);
-    impl StatusReadVal {
-        /// Status ready bit - Indicates if the core is ready to take a control command and process the block.
+    pub struct CombinerCtrlReadVal(u32);
+    impl CombinerCtrlReadVal {
+        /// Selects combined es_fips policy: 0=AND_OF_BOTH_ES (default), 1=PRIMARY_ES0_ONLY, 2=CONFIG_VALUE overriden by ROM, 3=reserved treated as AND_OF_BOTH_ES by RTL. SW writes are gated by hardware swwe (=!AHB_LOCK), so ROM freezes this policy at its programmed value once it sets W1S AHB_LOCK.
         #[inline(always)]
-        pub fn ready(&self) -> bool {
+        pub fn es_fips_policy(&self) -> u32 {
+            (self.0 >> 0) & 3
+        }
+        /// es_fips value used when es_fips_policy is CONFIG_VALUE. SW writes are gated by hardware swwe (=!AHB_LOCK) and frozen once ROM sets W1S AHB_LOCK.
+        #[inline(always)]
+        pub fn es_fips_cfg(&self) -> bool {
+            ((self.0 >> 8) & 1) != 0
+        }
+        /// Construct a WriteVal that can be used to modify the contents of this register value.
+        #[inline(always)]
+        pub fn modify(self) -> CombinerCtrlWriteVal {
+            CombinerCtrlWriteVal(self.0)
+        }
+    }
+    impl From<u32> for CombinerCtrlReadVal {
+        #[inline(always)]
+        fn from(val: u32) -> Self {
+            Self(val)
+        }
+    }
+    impl From<CombinerCtrlReadVal> for u32 {
+        #[inline(always)]
+        fn from(val: CombinerCtrlReadVal) -> u32 {
+            val.0
+        }
+    }
+    #[derive(Clone, Copy)]
+    pub struct CombinerCtrlWriteVal(u32);
+    impl CombinerCtrlWriteVal {
+        /// Selects combined es_fips policy: 0=AND_OF_BOTH_ES (default), 1=PRIMARY_ES0_ONLY, 2=CONFIG_VALUE overriden by ROM, 3=reserved treated as AND_OF_BOTH_ES by RTL. SW writes are gated by hardware swwe (=!AHB_LOCK), so ROM freezes this policy at its programmed value once it sets W1S AHB_LOCK.
+        #[inline(always)]
+        pub fn es_fips_policy(self, val: u32) -> Self {
+            Self((self.0 & !(3 << 0)) | ((val & 3) << 0))
+        }
+        /// es_fips value used when es_fips_policy is CONFIG_VALUE. SW writes are gated by hardware swwe (=!AHB_LOCK) and frozen once ROM sets W1S AHB_LOCK.
+        #[inline(always)]
+        pub fn es_fips_cfg(self, val: bool) -> Self {
+            Self((self.0 & !(1 << 8)) | (u32::from(val) << 8))
+        }
+    }
+    impl From<u32> for CombinerCtrlWriteVal {
+        #[inline(always)]
+        fn from(val: u32) -> Self {
+            Self(val)
+        }
+    }
+    impl From<CombinerCtrlWriteVal> for u32 {
+        #[inline(always)]
+        fn from(val: CombinerCtrlWriteVal) -> u32 {
+            val.0
+        }
+    }
+    #[derive(Clone, Copy)]
+    pub struct CombinerStatusReadVal(u32);
+    impl CombinerStatusReadVal {
+        /// combine_en_i strap registered by hardware (SW read-only). 1 = two entropy_src instances combined via SHA3-384, 0 = single entropy_src (combiner bypassed).
+        #[inline(always)]
+        pub fn combine_en(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
-        /// Status valid bit - Indicates if the process is done and the results have been stored in the keyvault.
+    }
+    impl From<u32> for CombinerStatusReadVal {
+        #[inline(always)]
+        fn from(val: u32) -> Self {
+            Self(val)
+        }
+    }
+    impl From<CombinerStatusReadVal> for u32 {
+        #[inline(always)]
+        fn from(val: CombinerStatusReadVal) -> u32 {
+            val.0
+        }
+    }
+    #[derive(Clone, Copy)]
+    pub struct KatCtrlWriteVal(u32);
+    impl KatCtrlWriteVal {
+        /// Write 1 to pulse-start a SHA3-384 KAT over KAT_MSG[0..23], using KAT_MSG_LEN bytes, through the same ot_sha3 datapath used for operational entropy combine.
+        #[inline(always)]
+        pub fn start(self, val: bool) -> Self {
+            Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
+        }
+    }
+    impl From<u32> for KatCtrlWriteVal {
+        #[inline(always)]
+        fn from(val: u32) -> Self {
+            Self(val)
+        }
+    }
+    impl From<KatCtrlWriteVal> for u32 {
+        #[inline(always)]
+        fn from(val: KatCtrlWriteVal) -> u32 {
+            val.0
+        }
+    }
+    #[derive(Clone, Copy)]
+    pub struct KatStatusReadVal(u32);
+    impl KatStatusReadVal {
+        /// A KAT hash is currently using the shared ot_sha3 datapath.
+        #[inline(always)]
+        pub fn busy(&self) -> bool {
+            ((self.0 >> 0) & 1) != 0
+        }
+        /// KAT_DIGEST holds a valid digest from the most recent successful KAT.
         #[inline(always)]
         pub fn valid(&self) -> bool {
             ((self.0 >> 1) & 1) != 0
         }
-        /// UDS Flow Completed
-        #[inline(always)]
-        pub fn uds_flow_done(&self) -> bool {
-            ((self.0 >> 2) & 1) != 0
-        }
-        /// FE flow completed
-        #[inline(always)]
-        pub fn fe_flow_done(&self) -> bool {
-            ((self.0 >> 3) & 1) != 0
-        }
-        /// Clear Secrets flow completed
-        #[inline(always)]
-        pub fn deobf_secrets_cleared(&self) -> bool {
-            ((self.0 >> 4) & 1) != 0
-        }
-        /// HEK flow completed
-        #[inline(always)]
-        pub fn hek_flow_done(&self) -> bool {
-            ((self.0 >> 5) & 1) != 0
-        }
-        /// Status error bit - Indicates if the DOE operation failed and results were not written to the keyvault.
-        #[inline(always)]
-        pub fn error(&self) -> bool {
-            ((self.0 >> 8) & 1) != 0
-        }
     }
-    impl From<u32> for StatusReadVal {
+    impl From<u32> for KatStatusReadVal {
         #[inline(always)]
         fn from(val: u32) -> Self {
             Self(val)
         }
     }
-    impl From<StatusReadVal> for u32 {
+    impl From<KatStatusReadVal> for u32 {
         #[inline(always)]
-        fn from(val: StatusReadVal) -> u32 {
+        fn from(val: KatStatusReadVal) -> u32 {
             val.0
         }
     }
     #[derive(Clone, Copy)]
     pub struct ErrorIntrEnTReadVal(u32);
     impl ErrorIntrEnTReadVal {
-        /// Enable bit for DOE FSM error (glitch or invalid state encoding detected)
+        /// Enable bit for ot_sha3 error_o.valid.
         #[inline(always)]
-        pub fn error0_en(&self) -> bool {
+        pub fn sha3_error_en(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
-        /// Enable bit for DOE flow error (Key Vault write failed)
+        /// Enable bit for ot_sha3 sparse-FSM error.
         #[inline(always)]
-        pub fn error1_en(&self) -> bool {
+        pub fn sparse_fsm_error_en(&self) -> bool {
             ((self.0 >> 1) & 1) != 0
         }
-        /// Enable bit for Event 2 (reserved, unused)
+        /// Enable bit for ot_sha3 counter error.
         #[inline(always)]
-        pub fn error2_en(&self) -> bool {
+        pub fn count_error_en(&self) -> bool {
             ((self.0 >> 2) & 1) != 0
         }
-        /// Enable bit for Event 3 (reserved, unused)
+        /// Enable bit for ot_sha3 keccak storage-reset error.
         #[inline(always)]
-        pub fn error3_en(&self) -> bool {
+        pub fn storage_rst_error_en(&self) -> bool {
             ((self.0 >> 3) & 1) != 0
+        }
+        /// Enable bit for combiner sparse-FSM error.
+        #[inline(always)]
+        pub fn combiner_fsm_error_en(&self) -> bool {
+            ((self.0 >> 4) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
         #[inline(always)]
@@ -684,25 +872,30 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct ErrorIntrEnTWriteVal(u32);
     impl ErrorIntrEnTWriteVal {
-        /// Enable bit for DOE FSM error (glitch or invalid state encoding detected)
+        /// Enable bit for ot_sha3 error_o.valid.
         #[inline(always)]
-        pub fn error0_en(self, val: bool) -> Self {
+        pub fn sha3_error_en(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
-        /// Enable bit for DOE flow error (Key Vault write failed)
+        /// Enable bit for ot_sha3 sparse-FSM error.
         #[inline(always)]
-        pub fn error1_en(self, val: bool) -> Self {
+        pub fn sparse_fsm_error_en(self, val: bool) -> Self {
             Self((self.0 & !(1 << 1)) | (u32::from(val) << 1))
         }
-        /// Enable bit for Event 2 (reserved, unused)
+        /// Enable bit for ot_sha3 counter error.
         #[inline(always)]
-        pub fn error2_en(self, val: bool) -> Self {
+        pub fn count_error_en(self, val: bool) -> Self {
             Self((self.0 & !(1 << 2)) | (u32::from(val) << 2))
         }
-        /// Enable bit for Event 3 (reserved, unused)
+        /// Enable bit for ot_sha3 keccak storage-reset error.
         #[inline(always)]
-        pub fn error3_en(self, val: bool) -> Self {
+        pub fn storage_rst_error_en(self, val: bool) -> Self {
             Self((self.0 & !(1 << 3)) | (u32::from(val) << 3))
+        }
+        /// Enable bit for combiner sparse-FSM error.
+        #[inline(always)]
+        pub fn combiner_fsm_error_en(self, val: bool) -> Self {
+            Self((self.0 & !(1 << 4)) | (u32::from(val) << 4))
         }
     }
     impl From<u32> for ErrorIntrEnTWriteVal {
@@ -720,25 +913,30 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct ErrorIntrTReadVal(u32);
     impl ErrorIntrTReadVal {
-        /// DOE FSM error interrupt status bit (glitch or invalid state encoding detected)
+        /// ot_sha3 error_o.valid latched.
         #[inline(always)]
-        pub fn error0_sts(&self) -> bool {
+        pub fn sha3_error_sts(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
-        /// DOE flow error interrupt status bit (Key Vault write failed)
+        /// ot_sha3 sparse-FSM error latched.
         #[inline(always)]
-        pub fn error1_sts(&self) -> bool {
+        pub fn sparse_fsm_error_sts(&self) -> bool {
             ((self.0 >> 1) & 1) != 0
         }
-        /// Interrupt Event 2 status bit (reserved, unused)
+        /// ot_sha3 counter error latched.
         #[inline(always)]
-        pub fn error2_sts(&self) -> bool {
+        pub fn count_error_sts(&self) -> bool {
             ((self.0 >> 2) & 1) != 0
         }
-        /// Interrupt Event 3 status bit (reserved, unused)
+        /// ot_sha3 keccak storage-reset error latched.
         #[inline(always)]
-        pub fn error3_sts(&self) -> bool {
+        pub fn storage_rst_error_sts(&self) -> bool {
             ((self.0 >> 3) & 1) != 0
+        }
+        /// Combiner sparse-FSM glitch: FSM trapped to the terminal error state (HD-3 detection). Latched so a detected fault is reported instead of silently stalling CSRNG.
+        #[inline(always)]
+        pub fn combiner_fsm_error_sts(&self) -> bool {
+            ((self.0 >> 4) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
         #[inline(always)]
@@ -761,25 +959,30 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct ErrorIntrTWriteVal(u32);
     impl ErrorIntrTWriteVal {
-        /// DOE FSM error interrupt status bit (glitch or invalid state encoding detected)
+        /// ot_sha3 error_o.valid latched.
         #[inline(always)]
-        pub fn error0_sts(self, val: bool) -> Self {
+        pub fn sha3_error_sts(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
-        /// DOE flow error interrupt status bit (Key Vault write failed)
+        /// ot_sha3 sparse-FSM error latched.
         #[inline(always)]
-        pub fn error1_sts(self, val: bool) -> Self {
+        pub fn sparse_fsm_error_sts(self, val: bool) -> Self {
             Self((self.0 & !(1 << 1)) | (u32::from(val) << 1))
         }
-        /// Interrupt Event 2 status bit (reserved, unused)
+        /// ot_sha3 counter error latched.
         #[inline(always)]
-        pub fn error2_sts(self, val: bool) -> Self {
+        pub fn count_error_sts(self, val: bool) -> Self {
             Self((self.0 & !(1 << 2)) | (u32::from(val) << 2))
         }
-        /// Interrupt Event 3 status bit (reserved, unused)
+        /// ot_sha3 keccak storage-reset error latched.
         #[inline(always)]
-        pub fn error3_sts(self, val: bool) -> Self {
+        pub fn storage_rst_error_sts(self, val: bool) -> Self {
             Self((self.0 & !(1 << 3)) | (u32::from(val) << 3))
+        }
+        /// Combiner sparse-FSM glitch: FSM trapped to the terminal error state (HD-3 detection). Latched so a detected fault is reported instead of silently stalling CSRNG.
+        #[inline(always)]
+        pub fn combiner_fsm_error_sts(self, val: bool) -> Self {
+            Self((self.0 & !(1 << 4)) | (u32::from(val) << 4))
         }
     }
     impl From<u32> for ErrorIntrTWriteVal {
@@ -797,25 +1000,30 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct ErrorIntrTrigTReadVal(u32);
     impl ErrorIntrTrigTReadVal {
-        /// Interrupt Trigger 0 bit (DOE FSM error)
+        /// Interrupt Trigger 0 bit
         #[inline(always)]
-        pub fn error0_trig(&self) -> bool {
+        pub fn sha3_error_trig(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
-        /// Interrupt Trigger 1 bit (DOE flow error, Key Vault write failed)
+        /// Interrupt Trigger 1 bit
         #[inline(always)]
-        pub fn error1_trig(&self) -> bool {
+        pub fn sparse_fsm_error_trig(&self) -> bool {
             ((self.0 >> 1) & 1) != 0
         }
-        /// Interrupt Trigger 2 bit (reserved, unused)
+        /// Interrupt Trigger 2 bit
         #[inline(always)]
-        pub fn error2_trig(&self) -> bool {
+        pub fn count_error_trig(&self) -> bool {
             ((self.0 >> 2) & 1) != 0
         }
-        /// Interrupt Trigger 3 bit (reserved, unused)
+        /// Interrupt Trigger 3 bit
         #[inline(always)]
-        pub fn error3_trig(&self) -> bool {
+        pub fn storage_rst_error_trig(&self) -> bool {
             ((self.0 >> 3) & 1) != 0
+        }
+        /// Interrupt Trigger 4 bit
+        #[inline(always)]
+        pub fn combiner_fsm_error_trig(&self) -> bool {
+            ((self.0 >> 4) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
         #[inline(always)]
@@ -838,25 +1046,30 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct ErrorIntrTrigTWriteVal(u32);
     impl ErrorIntrTrigTWriteVal {
-        /// Interrupt Trigger 0 bit (DOE FSM error)
+        /// Interrupt Trigger 0 bit
         #[inline(always)]
-        pub fn error0_trig(self, val: bool) -> Self {
+        pub fn sha3_error_trig(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
-        /// Interrupt Trigger 1 bit (DOE flow error, Key Vault write failed)
+        /// Interrupt Trigger 1 bit
         #[inline(always)]
-        pub fn error1_trig(self, val: bool) -> Self {
+        pub fn sparse_fsm_error_trig(self, val: bool) -> Self {
             Self((self.0 & !(1 << 1)) | (u32::from(val) << 1))
         }
-        /// Interrupt Trigger 2 bit (reserved, unused)
+        /// Interrupt Trigger 2 bit
         #[inline(always)]
-        pub fn error2_trig(self, val: bool) -> Self {
+        pub fn count_error_trig(self, val: bool) -> Self {
             Self((self.0 & !(1 << 2)) | (u32::from(val) << 2))
         }
-        /// Interrupt Trigger 3 bit (reserved, unused)
+        /// Interrupt Trigger 3 bit
         #[inline(always)]
-        pub fn error3_trig(self, val: bool) -> Self {
+        pub fn storage_rst_error_trig(self, val: bool) -> Self {
             Self((self.0 & !(1 << 3)) | (u32::from(val) << 3))
+        }
+        /// Interrupt Trigger 4 bit
+        #[inline(always)]
+        pub fn combiner_fsm_error_trig(self, val: bool) -> Self {
+            Self((self.0 & !(1 << 4)) | (u32::from(val) << 4))
         }
     }
     impl From<u32> for ErrorIntrTrigTWriteVal {
@@ -973,9 +1186,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrEnTReadVal(u32);
     impl NotifIntrEnTReadVal {
-        /// Enable bit for Command Done Interrupt
+        /// Enable bit for KAT-done notification. Asserted when a ROM KAT digest becomes valid.
         #[inline(always)]
-        pub fn notif_cmd_done_en(&self) -> bool {
+        pub fn notif_kat_done_en(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
@@ -999,9 +1212,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrEnTWriteVal(u32);
     impl NotifIntrEnTWriteVal {
-        /// Enable bit for Command Done Interrupt
+        /// Enable bit for KAT-done notification. Asserted when a ROM KAT digest becomes valid.
         #[inline(always)]
-        pub fn notif_cmd_done_en(self, val: bool) -> Self {
+        pub fn notif_kat_done_en(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
     }
@@ -1020,9 +1233,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrTReadVal(u32);
     impl NotifIntrTReadVal {
-        /// Command Done Interrupt status bit
+        /// KAT-done notification. Set when a ROM KAT digest becomes valid.
         #[inline(always)]
-        pub fn notif_cmd_done_sts(&self) -> bool {
+        pub fn notif_kat_done_sts(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
@@ -1046,9 +1259,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrTWriteVal(u32);
     impl NotifIntrTWriteVal {
-        /// Command Done Interrupt status bit
+        /// KAT-done notification. Set when a ROM KAT digest becomes valid.
         #[inline(always)]
-        pub fn notif_cmd_done_sts(self, val: bool) -> Self {
+        pub fn notif_kat_done_sts(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
     }
@@ -1067,9 +1280,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrTrigTReadVal(u32);
     impl NotifIntrTrigTReadVal {
-        /// Interrupt Trigger 0 bit
+        /// KAT-done notification trigger bit
         #[inline(always)]
-        pub fn notif_cmd_done_trig(&self) -> bool {
+        pub fn notif_kat_done_trig(&self) -> bool {
             ((self.0 >> 0) & 1) != 0
         }
         /// Construct a WriteVal that can be used to modify the contents of this register value.
@@ -1093,9 +1306,9 @@ pub mod regs {
     #[derive(Clone, Copy)]
     pub struct NotifIntrTrigTWriteVal(u32);
     impl NotifIntrTrigTWriteVal {
-        /// Interrupt Trigger 0 bit
+        /// KAT-done notification trigger bit
         #[inline(always)]
-        pub fn notif_cmd_done_trig(self, val: bool) -> Self {
+        pub fn notif_kat_done_trig(self, val: bool) -> Self {
             Self((self.0 & !(1 << 0)) | (u32::from(val) << 0))
         }
     }
@@ -1114,140 +1327,31 @@ pub mod regs {
 }
 pub mod enums {
     //! Enumerations used by some register fields.
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum DoeCmdE {
-        DoeIdle = 0,
-        DoeUds = 1,
-        DoeFe = 2,
-        DoeClearObfSecrets = 3,
-    }
-    impl DoeCmdE {
-        #[inline(always)]
-        pub fn doe_idle(&self) -> bool {
-            *self == Self::DoeIdle
-        }
-        #[inline(always)]
-        pub fn doe_uds(&self) -> bool {
-            *self == Self::DoeUds
-        }
-        #[inline(always)]
-        pub fn doe_fe(&self) -> bool {
-            *self == Self::DoeFe
-        }
-        #[inline(always)]
-        pub fn doe_clear_obf_secrets(&self) -> bool {
-            *self == Self::DoeClearObfSecrets
-        }
-    }
-    impl TryFrom<u32> for DoeCmdE {
-        type Error = ();
-        #[inline(always)]
-        fn try_from(val: u32) -> Result<DoeCmdE, ()> {
-            if val < 4 {
-                Ok(unsafe { core::mem::transmute::<u32, DoeCmdE>(val) })
-            } else {
-                Err(())
-            }
-        }
-    }
-    impl From<DoeCmdE> for u32 {
-        fn from(val: DoeCmdE) -> Self {
-            val as u32
-        }
-    }
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    #[repr(u32)]
-    pub enum DoeCmdExtE {
-        DoeStd = 0,
-        DoeHek = 1,
-        DoeRsvd0 = 2,
-        DoeRsvd1 = 3,
-    }
-    impl DoeCmdExtE {
-        #[inline(always)]
-        pub fn doe_std(&self) -> bool {
-            *self == Self::DoeStd
-        }
-        #[inline(always)]
-        pub fn doe_hek(&self) -> bool {
-            *self == Self::DoeHek
-        }
-        #[inline(always)]
-        pub fn doe_rsvd0(&self) -> bool {
-            *self == Self::DoeRsvd0
-        }
-        #[inline(always)]
-        pub fn doe_rsvd1(&self) -> bool {
-            *self == Self::DoeRsvd1
-        }
-    }
-    impl TryFrom<u32> for DoeCmdExtE {
-        type Error = ();
-        #[inline(always)]
-        fn try_from(val: u32) -> Result<DoeCmdExtE, ()> {
-            if val < 4 {
-                Ok(unsafe { core::mem::transmute::<u32, DoeCmdExtE>(val) })
-            } else {
-                Err(())
-            }
-        }
-    }
-    impl From<DoeCmdExtE> for u32 {
-        fn from(val: DoeCmdExtE) -> Self {
-            val as u32
-        }
-    }
-    pub mod selector {
-        pub struct DoeCmdESelector();
-        impl DoeCmdESelector {
-            #[inline(always)]
-            pub fn doe_idle(&self) -> super::DoeCmdE {
-                super::DoeCmdE::DoeIdle
-            }
-            #[inline(always)]
-            pub fn doe_uds(&self) -> super::DoeCmdE {
-                super::DoeCmdE::DoeUds
-            }
-            #[inline(always)]
-            pub fn doe_fe(&self) -> super::DoeCmdE {
-                super::DoeCmdE::DoeFe
-            }
-            #[inline(always)]
-            pub fn doe_clear_obf_secrets(&self) -> super::DoeCmdE {
-                super::DoeCmdE::DoeClearObfSecrets
-            }
-        }
-        pub struct DoeCmdExtESelector();
-        impl DoeCmdExtESelector {
-            #[inline(always)]
-            pub fn doe_std(&self) -> super::DoeCmdExtE {
-                super::DoeCmdExtE::DoeStd
-            }
-            #[inline(always)]
-            pub fn doe_hek(&self) -> super::DoeCmdExtE {
-                super::DoeCmdExtE::DoeHek
-            }
-            #[inline(always)]
-            pub fn doe_rsvd0(&self) -> super::DoeCmdExtE {
-                super::DoeCmdExtE::DoeRsvd0
-            }
-            #[inline(always)]
-            pub fn doe_rsvd1(&self) -> super::DoeCmdExtE {
-                super::DoeCmdExtE::DoeRsvd1
-            }
-        }
-    }
+    pub mod selector {}
 }
 pub mod meta {
     //! Additional metadata needed by caliptra_ureg.
-    pub type Iv = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type Ctrl = caliptra_ureg::ReadWriteReg32<
+    pub type CombinerName = caliptra_ureg::ReadOnlyReg32<u32>;
+    pub type CombinerVersion = caliptra_ureg::ReadOnlyReg32<u32>;
+    pub type KatCtrl =
+        caliptra_ureg::WriteOnlyReg32<0, crate::entropy_combiner::regs::KatCtrlWriteVal>;
+    pub type KatMsgLen = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type KatStatus =
+        caliptra_ureg::ReadOnlyReg32<crate::entropy_combiner::regs::KatStatusReadVal>;
+    pub type KatMsg = caliptra_ureg::WriteOnlyReg32<0, u32>;
+    pub type KatDigest = caliptra_ureg::ReadOnlyReg32<u32>;
+    pub type CombinerCtrl = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::doe::regs::CtrlReadVal,
-        crate::doe::regs::CtrlWriteVal,
+        crate::entropy_combiner::regs::CombinerCtrlReadVal,
+        crate::entropy_combiner::regs::CombinerCtrlWriteVal,
     >;
-    pub type Status = caliptra_ureg::ReadOnlyReg32<crate::doe::regs::StatusReadVal>;
+    pub type AhbLock = caliptra_ureg::ReadWriteReg32<
+        0,
+        crate::entropy_combiner::regs::AhbLockReadVal,
+        crate::entropy_combiner::regs::AhbLockWriteVal,
+    >;
+    pub type CombinerStatus =
+        caliptra_ureg::ReadOnlyReg32<crate::entropy_combiner::regs::CombinerStatusReadVal>;
     pub type IntrBlockRfGlobalIntrEnR = caliptra_ureg::ReadWriteReg32<
         0,
         crate::sha512_acc::regs::GlobalIntrEnTReadVal,
@@ -1255,13 +1359,13 @@ pub mod meta {
     >;
     pub type IntrBlockRfErrorIntrEnR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::doe::regs::ErrorIntrEnTReadVal,
-        crate::doe::regs::ErrorIntrEnTWriteVal,
+        crate::entropy_combiner::regs::ErrorIntrEnTReadVal,
+        crate::entropy_combiner::regs::ErrorIntrEnTWriteVal,
     >;
     pub type IntrBlockRfNotifIntrEnR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::sha512_acc::regs::NotifIntrEnTReadVal,
-        crate::sha512_acc::regs::NotifIntrEnTWriteVal,
+        crate::entropy_combiner::regs::NotifIntrEnTReadVal,
+        crate::entropy_combiner::regs::NotifIntrEnTWriteVal,
     >;
     pub type IntrBlockRfErrorGlobalIntrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::GlobalIntrTReadVal>;
@@ -1269,37 +1373,40 @@ pub mod meta {
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::GlobalIntrTReadVal>;
     pub type IntrBlockRfErrorInternalIntrR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::doe::regs::ErrorIntrTReadVal,
-        crate::doe::regs::ErrorIntrTWriteVal,
+        crate::entropy_combiner::regs::ErrorIntrTReadVal,
+        crate::entropy_combiner::regs::ErrorIntrTWriteVal,
     >;
     pub type IntrBlockRfNotifInternalIntrR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::sha512_acc::regs::NotifIntrTReadVal,
-        crate::sha512_acc::regs::NotifIntrTWriteVal,
+        crate::entropy_combiner::regs::NotifIntrTReadVal,
+        crate::entropy_combiner::regs::NotifIntrTWriteVal,
     >;
     pub type IntrBlockRfErrorIntrTrigR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::doe::regs::ErrorIntrTrigTReadVal,
-        crate::doe::regs::ErrorIntrTrigTWriteVal,
+        crate::entropy_combiner::regs::ErrorIntrTrigTReadVal,
+        crate::entropy_combiner::regs::ErrorIntrTrigTWriteVal,
     >;
     pub type IntrBlockRfNotifIntrTrigR = caliptra_ureg::ReadWriteReg32<
         0,
-        crate::sha512_acc::regs::NotifIntrTrigTReadVal,
-        crate::sha512_acc::regs::NotifIntrTrigTWriteVal,
+        crate::entropy_combiner::regs::NotifIntrTrigTReadVal,
+        crate::entropy_combiner::regs::NotifIntrTrigTWriteVal,
     >;
-    pub type IntrBlockRfError0IntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type IntrBlockRfError1IntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type IntrBlockRfError2IntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type IntrBlockRfError3IntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type IntrBlockRfNotifCmdDoneIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
-    pub type IntrBlockRfError0IntrCountIncrR =
+    pub type IntrBlockRfSha3ErrorIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfSparseFsmErrorIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfCountErrorIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfStorageRstErrorIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfCombinerFsmErrorIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfNotifKatDoneIntrCountR = caliptra_ureg::ReadWriteReg32<0, u32, u32>;
+    pub type IntrBlockRfSha3ErrorIntrCountIncrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
-    pub type IntrBlockRfError1IntrCountIncrR =
+    pub type IntrBlockRfSparseFsmErrorIntrCountIncrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
-    pub type IntrBlockRfError2IntrCountIncrR =
+    pub type IntrBlockRfCountErrorIntrCountIncrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
-    pub type IntrBlockRfError3IntrCountIncrR =
+    pub type IntrBlockRfStorageRstErrorIntrCountIncrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
-    pub type IntrBlockRfNotifCmdDoneIntrCountIncrR =
+    pub type IntrBlockRfCombinerFsmErrorIntrCountIncrR =
+        caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
+    pub type IntrBlockRfNotifKatDoneIntrCountIncrR =
         caliptra_ureg::ReadOnlyReg32<crate::sha512_acc::regs::IntrCountIncrTReadVal>;
 }

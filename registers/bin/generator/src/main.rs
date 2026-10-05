@@ -34,6 +34,7 @@ static CALIPTRA_RDL_FILES: &[&str] = &[
     "src/hmac/rtl/hmac_reg.rdl",
     "src/csrng/data/csrng.rdl",
     "src/entropy_src/data/entropy_src.rdl",
+    "src/entropy_combiner/rtl/entropy_combiner_reg.rdl",
     "src/sha256/rtl/sha256_reg.rdl",
     "src/sha3/rtl/sha3_reg.rdl",
     "src/sha512/rtl/sha512_reg.rdl",

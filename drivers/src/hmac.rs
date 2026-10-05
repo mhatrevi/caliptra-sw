@@ -231,8 +231,8 @@ impl Hmac {
         let hmac = self.hmac.regs_mut();
 
         let rand_data = trng.generate()?;
-        let iv: [u32; 12] = rand_data.0[..12].try_into().unwrap();
-        KvAccess::copy_from_arr(&Array4x12::from(iv), hmac.hmac512_lfsr_seed())?;
+        hmac.hmac512_lfsr_seed()
+            .write(&core::array::from_fn(|i| rand_data.0[i]));
         Ok(())
     }
 

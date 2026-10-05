@@ -475,7 +475,7 @@ impl Bus for SocRegistersInternal {
     fn read(&mut self, size: RvSize, addr: RvAddr) -> Result<RvData, BusError> {
         match addr {
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
-                self.regs.borrow_mut().read(size, addr)
+                self.regs.borrow_mut().read_register(size, addr)
             }
             _ => Err(LoadAccessFault),
         }
@@ -499,7 +499,7 @@ impl Bus for SocRegistersInternal {
                 }
             }
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
-                self.regs.borrow_mut().write(size, addr, val)
+                self.regs.borrow_mut().write_register(size, addr, val)
             }
             _ => Err(StoreAccessFault),
         }
@@ -549,7 +549,7 @@ impl Bus for SocRegistersExternal {
     fn read(&mut self, size: RvSize, addr: RvAddr) -> Result<RvData, BusError> {
         match addr {
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
-                self.regs.borrow_mut().read(size, addr)
+                self.regs.borrow_mut().read_register(size, addr)
             }
             _ => Err(LoadAccessFault),
         }
@@ -574,7 +574,7 @@ impl Bus for SocRegistersExternal {
                 }
             }
             CALIPTRA_REG_START_ADDR..=CALIPTRA_REG_END_ADDR => {
-                self.regs.borrow_mut().write(size, addr, val)
+                self.regs.borrow_mut().write_register(size, addr, val)
             }
             _ => Err(StoreAccessFault),
         }
@@ -598,6 +598,8 @@ impl Bus for SocRegistersExternal {
 #[derive(Bus)]
 #[poll_fn(bus_poll)]
 struct SocRegistersImpl {
+    hw_version: CaliptraHwVersion,
+
     #[register(offset = 0x0000)]
     cptra_hw_error_fatal: ReadWriteRegister<u32>,
 
@@ -1046,6 +1048,7 @@ impl SocRegistersImpl {
         };
 
         let regs = Self {
+            hw_version: args.hw_version,
             cptra_hw_error_fatal: ReadWriteRegister::new(0),
             cptra_hw_error_non_fatal: ReadWriteRegister::new(0),
             cptra_fw_error_fatal: ReadWriteRegister::new(0),
@@ -1186,6 +1189,28 @@ impl SocRegistersImpl {
             stash_measurement_bank,
         };
         regs
+    }
+
+    fn register_addr(&self, addr: RvAddr) -> Option<RvAddr> {
+        if self.hw_version != CaliptraHwVersion::V2_2 {
+            return Some(addr);
+        }
+        // The shared register storage uses the legacy entropy-configuration offsets.
+        match addr {
+            0x118..=0x11f => None,
+            0x180..=0x187 => Some(addr - (0x180 - 0x118)),
+            _ => Some(addr),
+        }
+    }
+
+    fn read_register(&mut self, size: RvSize, addr: RvAddr) -> Result<RvData, BusError> {
+        let addr = self.register_addr(addr).ok_or(LoadAccessFault)?;
+        self.read(size, addr)
+    }
+
+    fn write_register(&mut self, size: RvSize, addr: RvAddr, val: RvData) -> Result<(), BusError> {
+        let addr = self.register_addr(addr).ok_or(StoreAccessFault)?;
+        self.write(size, addr, val)
     }
 
     /// Clear secrets
@@ -1758,6 +1783,58 @@ mod tests {
     };
     use tock_registers::{interfaces::ReadWriteable, registers::InMemoryRegister};
     use zerocopy::IntoBytes;
+
+    #[test]
+    fn test_entropy_configuration_offsets_by_version() {
+        for hw_version in [
+            CaliptraHwVersion::V2_0,
+            CaliptraHwVersion::V2_1,
+            CaliptraHwVersion::V2_2,
+        ] {
+            let clock = Rc::new(Clock::new());
+            let mailbox = MailboxInternal::new(&clock, MailboxRam::default());
+            let args = CaliptraRootBusArgs {
+                hw_version,
+                clock: clock.clone(),
+                ..Default::default()
+            };
+            let mut caliptra_reg =
+                SocRegistersInternal::new(mailbox, Iccm::new(&clock), Mci::new(vec![]), args);
+            let mut soc_reg = caliptra_reg.external_regs();
+            let (base, wrong_base) = if hw_version == CaliptraHwVersion::V2_2 {
+                (0x180, 0x118)
+            } else {
+                (0x118, 0x180)
+            };
+
+            for offset in [0, 4] {
+                let addr = base + offset;
+                assert_eq!(caliptra_reg.read(RvSize::Word, addr).unwrap(), 0);
+                soc_reg.write(RvSize::Word, addr, 0x1234_5678).unwrap();
+                assert_eq!(caliptra_reg.read(RvSize::Word, addr).unwrap(), 0x1234_5678);
+                caliptra_reg.write(RvSize::Word, addr, 0xabcd_0123).unwrap();
+                assert_eq!(soc_reg.read(RvSize::Word, addr).unwrap(), 0xabcd_0123);
+
+                let wrong_addr = wrong_base + offset;
+                assert!(matches!(
+                    caliptra_reg.read(RvSize::Word, wrong_addr),
+                    Err(LoadAccessFault)
+                ));
+                assert!(matches!(
+                    soc_reg.read(RvSize::Word, wrong_addr),
+                    Err(LoadAccessFault)
+                ));
+                assert!(matches!(
+                    caliptra_reg.write(RvSize::Word, wrong_addr, 1),
+                    Err(StoreAccessFault)
+                ));
+                assert!(matches!(
+                    soc_reg.write(RvSize::Word, wrong_addr, 1),
+                    Err(StoreAccessFault)
+                ));
+            }
+        }
+    }
 
     fn send_data_to_mailbox(mailbox: &mut MailboxInternal, cmd: u32, data: &[u8]) {
         let regs = mailbox.regs();

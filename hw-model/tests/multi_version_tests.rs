@@ -7,6 +7,14 @@ use caliptra_emu_types::RvSize;
 use caliptra_hw_model::{BootParams, CaliptraHwVersion, HwModel, InitParams};
 
 #[test]
+fn test_default_hw_version_matches_registers() {
+    assert_eq!(
+        InitParams::default().hw_version.as_str(),
+        caliptra_registers::HW_REVISION
+    );
+}
+
+#[test]
 fn test_version_2_0_peripheral_slots() {
     let mut bus = CaliptraRootBus::new(CaliptraRootBusArgs {
         hw_version: CaliptraHwVersion::V2_0,

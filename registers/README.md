@@ -1,6 +1,7 @@
 The `caliptra-registers` crate re-exports generated hardware register accessors.
 `CALIPTRA_HW_REV=2.1` selects `hw/rev-2_1/registers`; an unset variable or
-`CALIPTRA_HW_REV=latest` selects `hw/latest/registers`.
+`CALIPTRA_HW_REV=latest` selects `hw/latest/registers`. On this development branch,
+`CALIPTRA_HW_REV=2.2` is an alias for the latest snapshot.
 
 Each hardware revision uses its `caliptra-ss` commit as the source of truth for
 register generation:
@@ -16,7 +17,9 @@ hw/<revision>/caliptra-ss
 
 The generator derives these paths from Caliptra-SS instead of accepting
 independently selected RTL and I3C repositories. Generated headers record all four
-source commits. The extra EL2 PIC RDL remains in `registers/bin/extra-rdl`.
+source commits, and Rustdoc preserves the upstream description formatting,
+including Markdown hard line breaks. The extra EL2 PIC RDL remains in
+`registers/bin/extra-rdl`.
 
 ## Regenerating a pinned revision
 
@@ -41,6 +44,22 @@ cargo run --locked -p caliptra_registers_generator -- --check \
 Use `hw/rev-2_1` in place of `hw/latest` to check the 2.1 snapshot.
 
 ## Updating latest hardware
+
+The current latest snapshot follows Caliptra-SS's 2.2 work-in-progress hardware,
+not a finalized 2.2 release. The 2.1 snapshot remains pinned separately.
+
+The hardware model defaults to the version represented by the selected register
+definitions: 2.2 for latest, or 2.1 for `CALIPTRA_HW_REV=2.1`. Set
+`InitParams::hw_version` explicitly when testing an older hardware/firmware
+combination. The emulator keeps the 2.0/2.1 entropy-configuration offsets separate
+from their relocated 2.2 addresses.
+
+FPGA subsystem fuse-map metadata also comes from the selected Caliptra-SS
+snapshot. Initialize `hw/rev-2_1/caliptra-ss` before building the FPGA subsystem
+model with `CALIPTRA_HW_REV=2.1`.
+
+The standalone `caliptra-emu` CLI retains its 2.1 default. Pass
+`--hw-version 2.2` when running firmware built against the latest snapshot.
 
 Advance only Caliptra-SS to its upstream `main`, then regenerate:
 

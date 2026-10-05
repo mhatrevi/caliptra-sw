@@ -52,6 +52,7 @@ caliptra-image-types.workspace = true
 tock-registers.workspace = true
 
 [build-dependencies]
+caliptra-registers.workspace = true
 deser-hjson.workspace = true
 serde = { workspace = true, features = ["derive"] }
 
