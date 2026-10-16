@@ -69,9 +69,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git submodule foreach --recursive 'test "$(git rev-parse HEAD)" = "$sha1"'
           ss="hw/latest/caliptra-ss"
-          test "$(git rev-parse HEAD:hw/latest/rtl)" = "$(git -C "$ss" rev-parse HEAD:third_party/caliptra-rtl)"
-          test "$(git rev-parse HEAD:hw/latest/i3c-core-rtl)" = "$(git -C "$ss" rev-parse HEAD:third_party/i3c-core)"
-          test "$(git -C hw/latest/rtl rev-parse HEAD:submodules/adams-bridge)" = "$(git -C "$ss/third_party/caliptra-rtl" rev-parse HEAD:submodules/adams-bridge)"
+          rtl="$ss/third_party/caliptra-rtl"
+          i3c="$ss/third_party/i3c-core"
+          test "$(git -C "$rtl" rev-parse HEAD)" = "$(git -C "$ss" rev-parse HEAD:third_party/caliptra-rtl)"
+          test "$(git -C "$i3c" rev-parse HEAD)" = "$(git -C "$ss" rev-parse HEAD:third_party/i3c-core)"
+          test "$(git -C "$rtl/submodules/adams-bridge" rev-parse HEAD)" = "$(git -C "$rtl" rev-parse HEAD:submodules/adams-bridge)"
           git diff --exit-code
 
       - name: Install native packaging dependencies

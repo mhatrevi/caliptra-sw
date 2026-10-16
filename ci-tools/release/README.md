@@ -21,9 +21,10 @@ immutable SHA. The workflow definition's `main` commit is recorded separately.
 ## Validation and hardware pins
 
 The build uses `CALIPTRA_HW_REV=2.2` and the checked-out source's Rust toolchain.
-It initializes submodules recursively at their recorded commits, verifies that
-the standalone RTL/I3C/Adams Bridge copies match the Caliptra-SS tree, and never
-uses `git submodule update --remote`.
+It initializes submodules recursively at their recorded commits and verifies
+RTL, I3C, and Adams Bridge at their nested Caliptra-SS paths. Duplicate standalone
+hardware checkouts are not required. It never uses
+`git submodule update --remote`.
 
 Before packaging, it checks formatting, runs emulator peripheral and ICCM-bounds
 tests, executes targeted boot/update/warm-reset/failure and PCR-policy/quote
