@@ -54,6 +54,8 @@ without checking out or executing the development source.
 
 These are development/test-key-signed artifacts, not production releases.
 Production 2.2 firmware requires subsystem mode; production passive loads are
-intentionally rejected. Warm/hitless ICCM boot-region re-arm still requires the
-pending RTL fix. The emulator models that intended reset behavior, and this
-workflow does not perform FPGA testing or RTL simulation.
+intentionally rejected. Reset/PCR semantics and hardware prerequisites are
+documented by the selected source snapshot's ROM documentation, linked in the
+release notes. Recent development snapshots include the RTL region-lock and
+SHA-lock fixes; older snapshots may still require them. This workflow does not
+perform FPGA testing or RTL simulation.

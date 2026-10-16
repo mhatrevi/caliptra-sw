@@ -173,8 +173,8 @@ jobs:
               "limitations": [
                   "Repository test signing keys; not for production deployment",
                   "Production 2.2 firmware requires subsystem mode",
-                  "Warm/hitless boot-region re-arm requires the pending RTL fix",
-                  "Emulator models the intended re-arm; no FPGA or RTL validation",
+                  "Reset and PCR semantics depend on the recorded RTL snapshot; see source ROM documentation",
+                  "Emulator validation only; no FPGA or RTL simulation",
               ],
           }
           workspace = pathlib.Path("release/workspace")
@@ -197,10 +197,11 @@ jobs:
           production-signed firmware.
 
           **Hardware prerequisite:** production 2.2 firmware requires subsystem
-          mode. Warm/hitless boot-region re-arm depends on the pending RTL fix.
-          The emulator models the intended reset behavior; this workflow performs
-          no FPGA testing or RTL simulation. Recorded hardware commits are used
-          unchanged, without updating submodules to remote branch tips.
+          mode. Consult the [source ROM documentation](https://github.com/{repository}/blob/{source_sha}/rom/dev/README.md)
+          for reset/PCR semantics and hardware prerequisites at this exact snapshot.
+          This workflow performs emulator validation, not FPGA testing or RTL
+          simulation. Recorded hardware commits are used unchanged, without
+          updating submodules to remote branch tips.
           """
           notes = "\n".join(line.removeprefix("          ") for line in notes.splitlines()) + "\n"
           (workspace / "dev-release-notes.md").write_text(notes)
