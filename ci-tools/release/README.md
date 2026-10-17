@@ -53,9 +53,9 @@ without checking out or executing the development source.
 ## Deployment limitations
 
 These are development/test-key-signed artifacts, not production releases.
-Production 2.2 firmware requires subsystem mode; production passive loads are
-intentionally rejected. Reset/PCR semantics and hardware prerequisites are
-documented by the selected source snapshot's ROM documentation, linked in the
-release notes. Recent development snapshots include the RTL region-lock and
-SHA-lock fixes; older snapshots may still require them. This workflow does not
-perform FPGA testing or RTL simulation.
+Supported integration modes, required hardware fixes, and reset/PCR semantics
+are documented by the selected source snapshot's ROM documentation, linked in
+the release notes. Passive-mode firmware may require the hardware team's fix
+that disables passive boot-flow monitoring. Recent development snapshots include
+the RTL region-lock and SHA-lock fixes; older snapshots may still require them.
+This workflow does not perform FPGA testing or RTL simulation.

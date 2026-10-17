@@ -172,7 +172,7 @@ jobs:
               ],
               "limitations": [
                   "Repository test signing keys; not for production deployment",
-                  "Production 2.2 firmware requires subsystem mode",
+                  "Supported integration modes and required hardware fixes are documented by the source ROM snapshot",
                   "Reset and PCR semantics depend on the recorded RTL snapshot; see source ROM documentation",
                   "Emulator validation only; no FPGA or RTL simulation",
               ],
@@ -196,9 +196,9 @@ jobs:
           Images use repository test signing keys and must not be deployed as
           production-signed firmware.
 
-          **Hardware prerequisite:** production 2.2 firmware requires subsystem
-          mode. Consult the [source ROM documentation](https://github.com/{repository}/blob/{source_sha}/rom/dev/README.md)
-          for reset/PCR semantics and hardware prerequisites at this exact snapshot.
+          **Hardware prerequisites:** consult the [source ROM documentation](https://github.com/{repository}/blob/{source_sha}/rom/dev/README.md)
+          for supported integration modes, required hardware fixes, and reset/PCR
+          semantics at this exact snapshot.
           This workflow performs emulator validation, not FPGA testing or RTL
           simulation. Recorded hardware commits are used unchanged, without
           updating submodules to remote branch tips.
