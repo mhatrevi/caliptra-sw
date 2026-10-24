@@ -41,6 +41,17 @@ release notes, and `SHA256SUMS`. The metadata and notes are also inside the ZIP.
 The ZIP, metadata, notes, and checksums are retained as workflow artifacts and
 attached to the GitHub draft release.
 
+For ROM-only downloads, choose the `rom-binaries-TAG` Actions artifact. Its ZIP
+contains `caliptra-rom.bin`, `caliptra-rom-with-log.bin`, `build-metadata.json`,
+and a matching `SHA256SUMS` directly at the archive root. Extract it once, then
+run `sha256sum --check SHA256SUMS` in the extracted directory.
+
+GitHub automatically wraps Actions artifacts in a ZIP. The existing
+`dev-release-TAG` artifact contains the prebuilt complete release ZIP, so its
+Actions download still has a nested archive. Download the complete ZIP asset
+from the draft release instead if the full bundle is needed without that
+additional wrapper.
+
 Tags have the form
 `dev-2.2-YYYYMMDD.RUN_NUMBER.RUN_ATTEMPT-gCOMMIT_PREFIX`, so re-runs do not
 overwrite an earlier snapshot. Releases are always drafts and prereleases and

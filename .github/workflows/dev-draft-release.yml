@@ -100,7 +100,7 @@ jobs:
           cargo test --locked -p caliptra-rom --test rom_integration_tests -- \
             test_iccm_integrity \
             test_update_reset_success \
-            test_update_reset_post_load_digest_mismatch_is_fatal \
+            test_update_reset_no_post_copy_digest_or_pcr_comparison \
             test_warm_reset_success \
             test_update_reset_non_fw_load_cmd \
             test_update_reset_fmc_load_addr_mismatch
@@ -213,6 +213,26 @@ jobs:
           cd release
           sha256sum "caliptra_${RELEASE_TAG}.zip" build-metadata.json dev-release-notes.md > SHA256SUMS
           sha256sum --check SHA256SUMS
+
+      - name: Prepare standalone ROM binaries
+        run: |
+          mkdir -p release/rom
+          cp release/workspace/caliptra-rom.bin \
+             release/workspace/caliptra-rom-with-log.bin \
+             release/workspace/build-metadata.json release/rom/
+          (
+            cd release/rom
+            sha256sum caliptra-rom.bin caliptra-rom-with-log.bin build-metadata.json > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          printf 'ROM-only download: `rom-binaries-%s` Actions artifact (no nested release ZIP).\n' "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload standalone ROM binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rom-binaries-${{ needs.resolve.outputs.tag }}
+          if-no-files-found: error
+          path: release/rom/
 
       - name: Upload validated release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
