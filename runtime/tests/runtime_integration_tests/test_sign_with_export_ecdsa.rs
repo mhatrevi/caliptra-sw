@@ -30,7 +30,7 @@ use openssl::{
     x509::{
         store::X509StoreBuilder,
         verify::{X509VerifyFlags, X509VerifyParam},
-        X509StoreContext, X509VerifyResult, X509,
+        X509Ref, X509StoreContext, X509VerifyResult, X509,
     },
 };
 use x509_cert::{
@@ -216,6 +216,7 @@ fn check_exported_cdi_chain_pathlen(intermediate_ca_count: u32, expect_success: 
     assert!(critical);
     assert!(constraints.ca);
     assert_eq!(constraints.path_len_constraint, Some(4));
+    let rt_pathlen = constraints.path_len_constraint.unwrap();
 
     let derive_cmd = DeriveContextCmd {
         flags: DeriveContextFlags::EXPORT_CDI | DeriveContextFlags::CREATE_CERTIFICATE,
@@ -307,10 +308,81 @@ fn check_exported_cdi_chain_pathlen(intermediate_ca_count: u32, expect_success: 
     params.set_depth(16);
     roots.set_param(&params).unwrap();
     let roots = roots.build();
+    let common_name = |cert: &X509Ref| {
+        cert.subject_name()
+            .entries_by_nid(Nid::COMMONNAME)
+            .next()
+            .unwrap()
+            .data()
+            .as_utf8()
+            .unwrap()
+            .to_string()
+    };
     X509StoreContext::new()
         .unwrap()
         .init(&roots, &leaf_cert, &chain, |ctx| {
+            println!(
+                "\n[pathlen] === {} case: {intermediate_ca_count} intermediate CAs below DPE ===",
+                if expect_success {
+                    "POSITIVE"
+                } else {
+                    "NEGATIVE"
+                }
+            );
+            println!(
+                "[pathlen] CA1 signature verified against DPE CA after SIGN_WITH_EXPORTED_ECDSA"
+            );
+            println!("[pathlen] Trust anchor: LDevID; RT Alias and DPE are not trusted directly");
             let success = ctx.verify_cert().unwrap();
+            println!(
+                "[pathlen] OpenSSL verification: {} (error {}: {})",
+                if success { "ACCEPTED" } else { "REJECTED" },
+                ctx.error().as_raw(),
+                ctx.error()
+            );
+            let built_chain = ctx.chain().unwrap();
+            let rt_depth = built_chain
+                .iter()
+                .position(|cert| cert.to_der().unwrap() == rt_der)
+                .unwrap();
+            let mut ca_count_below_rt = 0;
+            println!("[pathlen] OpenSSL-built chain (trust anchor -> leaf):");
+            for (depth, cert) in built_chain.iter().enumerate().rev() {
+                let tbs = Certificate::from_der(&cert.to_der().unwrap())
+                    .unwrap()
+                    .tbs_certificate;
+                let (_, constraints) = tbs.get::<BasicConstraints>().unwrap().unwrap();
+                if depth < rt_depth
+                    && constraints.ca
+                    && cert.subject_name().try_cmp(cert.issuer_name()).unwrap()
+                        != std::cmp::Ordering::Equal
+                {
+                    ca_count_below_rt += 1;
+                }
+                println!(
+                    "[pathlen]   depth {depth}: {} | CA={} | pathLen={}",
+                    common_name(cert),
+                    constraints.ca,
+                    constraints
+                        .path_len_constraint
+                        .map_or_else(|| "none".to_string(), |limit| limit.to_string())
+                );
+            }
+            println!(
+                "[pathlen] RT Alias pathLenConstraint={rt_pathlen}; \
+                 non-self-issued CAs below it={ca_count_below_rt} (leaf excluded)"
+            );
+            if !success {
+                println!(
+                    "[pathlen] Error certificate: {} at depth {}",
+                    common_name(ctx.current_cert().unwrap()),
+                    ctx.error_depth()
+                );
+            }
+            assert_eq!(
+                ca_count_below_rt,
+                usize::try_from(intermediate_ca_count + 1).unwrap()
+            );
             assert_eq!(
                 success,
                 expect_success,
@@ -324,11 +396,19 @@ fn check_exported_cdi_chain_pathlen(intermediate_ca_count: u32, expect_success: 
                     ctx.chain().unwrap().len(),
                     usize::try_from(intermediate_ca_count).unwrap() + 5
                 );
+                println!(
+                    "[pathlen] PASS: leaf accepted with {ca_count_below_rt} CAs \
+                     below RT Alias (limit {rt_pathlen})"
+                );
             } else {
                 // X509_V_ERR_PATH_LENGTH_EXCEEDED.
                 assert_eq!(ctx.error().as_raw(), 25, "{}", ctx.error());
                 assert_eq!(ctx.error_depth(), intermediate_ca_count + 2);
                 assert_eq!(ctx.current_cert().unwrap().to_der().unwrap(), rt_der);
+                println!(
+                    "[pathlen] PASS: expected rejection at RT Alias; \
+                     {ca_count_below_rt} subordinate CAs exceed limit {rt_pathlen}"
+                );
             }
             Ok(())
         })

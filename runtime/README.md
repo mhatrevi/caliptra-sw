@@ -3121,7 +3121,7 @@ The ECDSA runtime integration tests exercise certificate issuance through
 `SIGN_WITH_EXPORTED_ECDSA` using the software emulator:
 
 ```shell
-cargo test -p caliptra-runtime --test runtime_integration_tests exported_cdi_chain_pathlen -- --nocapture
+cargo test -p caliptra-runtime --test runtime_integration_tests exported_cdi_chain_pathlen -- --nocapture --test-threads=1
 ```
 
 The tests use firmware-produced LDevID, FMC Alias, RT Alias, and exported-CDI
@@ -3131,6 +3131,22 @@ additional intermediate CAs succeeds, while adding a fourth intermediate CA
 fails with `X509_V_ERR_PATH_LENGTH_EXCEEDED` at RT Alias. The generated
 intermediate CAs omit their own path-length constraints, and the verifier's
 depth limit is set above both chain lengths to isolate the inherited limit.
+
+With `--nocapture`, each case prints `[pathlen]` diagnostics showing the actual
+OpenSSL-built chain, each certificate's CA flag and path-length constraint, the
+number of non-self-issued CAs below RT Alias, and OpenSSL's verification result.
+The negative case also prints the actual error code, description, certificate,
+and depth before asserting that the rejection is specifically at RT Alias.
+
+For a compact terminal screenshot without firmware boot logs, filter the
+diagnostic lines and test summary. Keep `pipefail` enabled so a failing test or
+build cannot be masked by a successful filter:
+
+```bash
+set -o pipefail
+cargo test -p caliptra-runtime --test runtime_integration_tests exported_cdi_chain_pathlen -- --nocapture --test-threads=1 2>&1 \
+  | grep -E '\[pathlen\]|test result:|^error:|panicked|^failures:'
+```
 
 ### SIGN\_WITH\_EXPORTED\_MLDSA
 
