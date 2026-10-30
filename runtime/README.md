@@ -3115,6 +3115,23 @@ Command Code: `0x5357_4545` ("SWEE")
 
 The `exported_cdi_handle` can be created by calling `DeriveContext` with the `export-cdi` and `create-certificate` flags.
 
+#### Exported-CDI certificate path-length tests
+
+The ECDSA runtime integration tests exercise certificate issuance through
+`SIGN_WITH_EXPORTED_ECDSA` using the software emulator:
+
+```shell
+cargo test -p caliptra-runtime --test runtime_integration_tests exported_cdi_chain_pathlen -- --nocapture
+```
+
+The tests use firmware-produced LDevID, FMC Alias, RT Alias, and exported-CDI
+DPE CA certificates. OpenSSL validates the final non-CA leaf with LDevID as the
+test trust anchor. RT Alias has `pathLenConstraint=4`: the DPE CA plus three
+additional intermediate CAs succeeds, while adding a fourth intermediate CA
+fails with `X509_V_ERR_PATH_LENGTH_EXCEEDED` at RT Alias. The generated
+intermediate CAs omit their own path-length constraints, and the verifier's
+depth limit is set above both chain lengths to isolate the inherited limit.
+
 ### SIGN\_WITH\_EXPORTED\_MLDSA
 
 Command Code: `0x5357_4D4C` ("SWML")

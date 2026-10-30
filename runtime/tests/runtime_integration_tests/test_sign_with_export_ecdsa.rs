@@ -1,7 +1,7 @@
 // Licensed under the Apache-2.0 license
 
 use caliptra_api::{
-    mailbox::{MailboxRespHeader, RevokeExportedCdiHandleReq},
+    mailbox::{GetLdevEcc384CertReq, MailboxRespHeader, RevokeExportedCdiHandleReq},
     SocManager,
 };
 use caliptra_common::mailbox_api::{
@@ -18,17 +18,39 @@ use caliptra_dpe_crypto::{CryptoError, MAX_EXPORTED_CDI_SIZE};
 use caliptra_error::CaliptraError;
 use caliptra_hw_model::{HwModel, ModelError, SecurityState};
 use caliptra_runtime::{CaliptraDpeProfile, RtBootStatus, TciMeasurement};
+use caliptra_x509::{Ecdsa384CertBuilder, Ecdsa384Signature};
 use openssl::{
     bn::BigNum,
     ec::{EcGroup, EcKey},
     ecdsa::EcdsaSig,
     nid::Nid,
-    x509::X509,
+    pkey::{PKey, Private},
+    sha::sha384,
+    stack::Stack,
+    x509::{
+        store::X509StoreBuilder,
+        verify::{X509VerifyFlags, X509VerifyParam},
+        X509StoreContext, X509VerifyResult, X509,
+    },
+};
+use x509_cert::{
+    certificate::Version,
+    der::{Decode, Encode},
+    ext::{
+        pkix::{
+            AuthorityKeyIdentifier, BasicConstraints, KeyUsage, KeyUsages, SubjectKeyIdentifier,
+        },
+        AsExtension,
+    },
+    name::Name,
+    spki::{SubjectPublicKeyInfoOwned, SubjectPublicKeyInfoRef},
+    Certificate, TbsCertificate,
 };
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::common::{
-    assert_error, execute_dpe_cmd, run_rt_test, DpeResult, RuntimeTestArgs, TEST_DIGEST,
+    assert_error, execute_dpe_cmd, get_certs, get_ecc_fmc_alias_cert, get_rt_alias_ecc384_cert,
+    run_rt_test, DpeResult, RuntimeTestArgs, TEST_DIGEST,
 };
 
 fn check_certificate_signature(
@@ -108,6 +130,219 @@ fn test_sign_with_exported_cdi() {
     let response = result.unwrap().unwrap();
     let sign_resp = SignWithExportedEcdsaResp::ref_from_bytes(response.as_bytes()).unwrap();
     assert!(check_certificate_signature(sign_resp, &derive_resp));
+}
+
+fn pathlen_test_tbs(
+    issuer: &X509,
+    subject_key: &PKey<Private>,
+    subject_name: &str,
+    serial: u32,
+    ca: bool,
+) -> Vec<u8> {
+    let issuer_tbs = Certificate::from_der(&issuer.to_der().unwrap())
+        .unwrap()
+        .tbs_certificate;
+    let (_, issuer_key_id) = issuer_tbs.get::<SubjectKeyIdentifier>().unwrap().unwrap();
+    let public_key_der = subject_key.public_key_to_der().unwrap();
+    let subject: Name = format!("CN={subject_name}").parse().unwrap();
+    let subject_key_id =
+        SubjectKeyIdentifier::try_from(SubjectPublicKeyInfoRef::from_der(&public_key_der).unwrap())
+            .unwrap();
+    // Leave subordinate CAs unconstrained so only the inherited limits are tested.
+    let basic_constraints = BasicConstraints {
+        ca,
+        path_len_constraint: None,
+    };
+    let key_usage = KeyUsage(if ca {
+        KeyUsages::DigitalSignature | KeyUsages::KeyCertSign
+    } else {
+        KeyUsages::DigitalSignature.into()
+    });
+    let authority_key_id = AuthorityKeyIdentifier {
+        key_identifier: Some(issuer_key_id.0),
+        ..Default::default()
+    };
+    let extensions = vec![
+        basic_constraints.to_extension(&subject, &[]).unwrap(),
+        key_usage.to_extension(&subject, &[]).unwrap(),
+        subject_key_id.to_extension(&subject, &[]).unwrap(),
+        authority_key_id.to_extension(&subject, &[]).unwrap(),
+    ];
+
+    TbsCertificate {
+        version: Version::V3,
+        serial_number: serial.into(),
+        signature: issuer_tbs.signature,
+        issuer: issuer_tbs.subject,
+        validity: issuer_tbs.validity,
+        subject,
+        subject_public_key_info: SubjectPublicKeyInfoOwned::from_der(&public_key_der).unwrap(),
+        issuer_unique_id: None,
+        subject_unique_id: None,
+        extensions: Some(extensions),
+    }
+    .to_der()
+    .unwrap()
+}
+
+fn pathlen_test_sign(tbs: &[u8], issuer_key: &PKey<Private>) -> Ecdsa384Signature {
+    let signature = EcdsaSig::sign(&sha384(tbs), &issuer_key.ec_key().unwrap()).unwrap();
+    Ecdsa384Signature {
+        r: signature.r().to_vec_padded(48).unwrap().try_into().unwrap(),
+        s: signature.s().to_vec_padded(48).unwrap().try_into().unwrap(),
+    }
+}
+
+fn pathlen_test_cert(tbs: &[u8], signature: &Ecdsa384Signature) -> X509 {
+    let builder = Ecdsa384CertBuilder::new(tbs, signature).unwrap();
+    let mut der = vec![0; builder.len()];
+    builder.build(&mut der).unwrap();
+    X509::from_der(&der).unwrap()
+}
+
+fn check_exported_cdi_chain_pathlen(intermediate_ca_count: u32, expect_success: bool) {
+    let mut model = run_rt_test(RuntimeTestArgs::default());
+    model.step_until_ready_for_runtime();
+
+    let ldev_resp = get_certs::<GetLdevEcc384CertReq>(&mut model);
+    let ldev_cert = X509::from_der(&ldev_resp.data[..ldev_resp.data_size as usize]).unwrap();
+    let fmc_resp = get_ecc_fmc_alias_cert(&mut model);
+    let fmc_cert = X509::from_der(&fmc_resp.data[..fmc_resp.data_size as usize]).unwrap();
+    let rt_resp = get_rt_alias_ecc384_cert(&mut model);
+    let rt_der = &rt_resp.data[..rt_resp.data_size as usize];
+    let rt_cert = X509::from_der(rt_der).unwrap();
+    let rt_tbs = Certificate::from_der(rt_der).unwrap().tbs_certificate;
+    let (critical, constraints) = rt_tbs.get::<BasicConstraints>().unwrap().unwrap();
+    assert!(critical);
+    assert!(constraints.ca);
+    assert_eq!(constraints.path_len_constraint, Some(4));
+
+    let derive_cmd = DeriveContextCmd {
+        flags: DeriveContextFlags::EXPORT_CDI | DeriveContextFlags::CREATE_CERTIFICATE,
+        ..Default::default()
+    };
+    let Some(Response::DeriveContextExportedCdi(derive_resp)) = execute_dpe_cmd(
+        &mut model,
+        CaliptraDpeProfile::Ecc384,
+        &mut Command::from(&derive_cmd),
+        DpeResult::Success,
+    ) else {
+        panic!("expected exported-CDI certificate and handle");
+    };
+    let dpe_der = &derive_resp.new_certificate[..derive_resp.header.certificate_size as usize];
+    let dpe_cert = X509::from_der(dpe_der).unwrap();
+    let dpe_tbs = Certificate::from_der(dpe_der).unwrap().tbs_certificate;
+    let (critical, constraints) = dpe_tbs.get::<BasicConstraints>().unwrap().unwrap();
+    assert!(critical);
+    assert!(constraints.ca);
+    assert_eq!(constraints.path_len_constraint, None);
+    assert!(dpe_tbs
+        .get::<KeyUsage>()
+        .unwrap()
+        .unwrap()
+        .1
+        .key_cert_sign());
+    assert!(dpe_cert.verify(&rt_cert.public_key().unwrap()).unwrap());
+
+    let mut chain = Stack::new().unwrap();
+    chain.push(fmc_cert).unwrap();
+    chain.push(rt_cert).unwrap();
+    chain.push(dpe_cert.clone()).unwrap();
+    let group = EcGroup::from_curve_name(Nid::SECP384R1).unwrap();
+    let mut issuer_cert = dpe_cert;
+    let mut issuer_key: Option<PKey<Private>> = None;
+    for index in 1..=intermediate_ca_count {
+        let key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
+        let tbs = pathlen_test_tbs(
+            &issuer_cert,
+            &key,
+            &format!("Intermediate CA {index}"),
+            index,
+            true,
+        );
+        let signature = if let Some(key) = &issuer_key {
+            pathlen_test_sign(&tbs, key)
+        } else {
+            let mut cmd = MailboxReq::SignWithExportedEcdsa(SignWithExportedEcdsaReq {
+                hdr: MailboxReqHeader { chksum: 0 },
+                exported_cdi_handle: derive_resp.header.exported_cdi,
+                tbs: sha384(&tbs),
+            });
+            cmd.populate_chksum().unwrap();
+            let resp = model
+                .mailbox_execute(
+                    CommandId::SIGN_WITH_EXPORTED_ECDSA.into(),
+                    cmd.as_bytes().unwrap(),
+                )
+                .unwrap()
+                .unwrap();
+            let resp = SignWithExportedEcdsaResp::ref_from_bytes(&resp).unwrap();
+            Ecdsa384Signature {
+                r: resp.signature_r,
+                s: resp.signature_s,
+            }
+        };
+        let cert = pathlen_test_cert(&tbs, &signature);
+        assert!(cert.verify(&issuer_cert.public_key().unwrap()).unwrap());
+        chain.push(cert.clone()).unwrap();
+        issuer_cert = cert;
+        issuer_key = Some(key);
+    }
+
+    let leaf_key = PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
+    let leaf_tbs = pathlen_test_tbs(&issuer_cert, &leaf_key, "Leaf", 100, false);
+    let leaf_signature = pathlen_test_sign(&leaf_tbs, issuer_key.as_ref().unwrap());
+    let leaf_cert = pathlen_test_cert(&leaf_tbs, &leaf_signature);
+    assert!(leaf_cert
+        .verify(&issuer_cert.public_key().unwrap())
+        .unwrap());
+
+    // Trust LDevID, not DPE or RT Alias, so their inherited constraints are checked.
+    let mut roots = X509StoreBuilder::new().unwrap();
+    roots.add_cert(ldev_cert).unwrap();
+    roots
+        .set_flags(X509VerifyFlags::X509_STRICT | X509VerifyFlags::PARTIAL_CHAIN)
+        .unwrap();
+    let mut params = X509VerifyParam::new().unwrap();
+    params.set_depth(16);
+    roots.set_param(&params).unwrap();
+    let roots = roots.build();
+    X509StoreContext::new()
+        .unwrap()
+        .init(&roots, &leaf_cert, &chain, |ctx| {
+            let success = ctx.verify_cert().unwrap();
+            assert_eq!(
+                success,
+                expect_success,
+                "OpenSSL: {} at depth {}",
+                ctx.error(),
+                ctx.error_depth()
+            );
+            if expect_success {
+                assert_eq!(ctx.error(), X509VerifyResult::OK);
+                assert_eq!(
+                    ctx.chain().unwrap().len(),
+                    usize::try_from(intermediate_ca_count).unwrap() + 5
+                );
+            } else {
+                // X509_V_ERR_PATH_LENGTH_EXCEEDED.
+                assert_eq!(ctx.error().as_raw(), 25, "{}", ctx.error());
+                assert_eq!(ctx.error_depth(), intermediate_ca_count + 2);
+                assert_eq!(ctx.current_cert().unwrap().to_der().unwrap(), rt_der);
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn test_exported_cdi_chain_pathlen_allows_three_intermediates() {
+    check_exported_cdi_chain_pathlen(3, true);
+}
+
+#[test]
+fn test_exported_cdi_chain_pathlen_rejects_four_intermediates() {
+    check_exported_cdi_chain_pathlen(4, false);
 }
 
 #[test]
