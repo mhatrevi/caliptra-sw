@@ -281,14 +281,13 @@ fn dpe_tcb_snapshots(model: &mut DefaultHwModel) -> Vec<TcbSnapshot> {
 }
 
 fn find_tcb_snapshot<'a>(snapshots: &'a [TcbSnapshot], tci_type: &[u8; 4]) -> &'a TcbSnapshot {
-    let tci_type = u32::from_be_bytes(*tci_type);
     snapshots
         .iter()
-        .find(|snapshot| snapshot.tci_type == tci_type.as_bytes())
+        .find(|snapshot| snapshot.tci_type == *tci_type)
         .unwrap_or_else(|| {
             panic!(
                 "{} TCB info missing",
-                core::str::from_utf8(tci_type.as_bytes()).unwrap()
+                core::str::from_utf8(tci_type).unwrap()
             )
         })
 }
@@ -418,7 +417,7 @@ fn test_recovery_flow_debug_auth_manifest_requires_debug_intent() {
     ignore
 )]
 #[test]
-fn test_recovery_flow_debug_auth_manifest_disabled_by_strap() {
+fn test_recovery_flow_debug_auth_manifest_disabled_by_fw_feature_cfg() {
     let mcu_fw = vec![0x37u8; 256];
     let debug_flags = AuthManifestFlags::VENDOR_SIGNATURE_REQUIRED | AuthManifestFlags::DEBUG_IMAGE;
 
@@ -434,7 +433,7 @@ fn test_recovery_flow_debug_auth_manifest_disabled_by_strap() {
             }),
             subsystem_mode: true,
             debug_intent: true,
-            initial_ss_strap_generic_3: Some(DISABLE_VENDOR_DEBUG_IMAGES),
+            initial_ss_fw_feature_cfg: Some(DISABLE_VENDOR_DEBUG_IMAGES),
             soc_manifest: Some(soc_manifest.as_bytes()),
             mcu_fw_image: Some(&mcu_fw),
             successful_reach_rt: false,

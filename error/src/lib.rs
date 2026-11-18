@@ -2058,6 +2058,11 @@ impl CaliptraError {
             0x000E00B4,
             "Runtime Error: Auth manifest UEID does not match device UEID"
         ),
+        (
+            RUNTIME_ZEROIZE_UDS_FE_NOT_SUBSYSTEM_MODE,
+            0x000E00B5,
+            "Runtime Error: UDS/FE zeroization requires subsystem mode"
+        ),
         // FMC Errors
         (FMC_GLOBAL_NMI, 0x000F0001, "FMC Error: Global NMI"),
         (
@@ -2206,6 +2211,11 @@ impl CaliptraError {
             DRIVER_SOC_IFC_ICCM_REGION_COMMIT_FAILURE,
             0x00100005,
             "SOC_IFC driver Error: ICCM boot region commit failed"
+        ),
+        (
+            DRIVER_SOC_IFC_INVALID_SOC_MANIFEST_SVN,
+            0x00100006,
+            "SOC_IFC driver Error: SoC manifest SVN cannot be represented in measurements"
         ),
         (
             ADDRESS_MISALIGNED,

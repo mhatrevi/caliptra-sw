@@ -75,6 +75,20 @@ After booting, Caliptra Runtime Firmware is responsible for the following.
 
 Callers must wait until Caliptra is no longer busy to call a mailbox command.
 
+### Command watchdog
+
+On debug-locked devices, Runtime starts WDT1 before processing each mailbox
+command with a timeout of `max(20_000_000, CPTRA_WDT_CFG)` cycles. Runtime reads
+the full 64-bit configuration value; zero or a value below 20 million cycles
+retains the existing 20-million-cycle minimum. Larger values extend the timeout.
+
+The timeout covers the entire command, including DMA image hashing and any
+measurement stashing. Platforms using single-DWORD DMA hashing must configure
+enough time for their supported image sizes and worst-case AXI latency, plus the
+remaining command processing. Runtime stops the watchdog after command
+processing and while idle. The watchdog is not started on debug-unlocked devices.
+This Runtime minimum does not change ROM's watchdog configuration policy.
+
 ### Fault handling
 
 A mailbox command can fail to complete in the following ways:
@@ -248,7 +262,7 @@ The manifest begins with the Preamble section, which contains new manifest ECC a
 
 The IMC is a collection of Image Metadata entries (IME). Each IME has a hash that matches one of the multiple SoC images. The manifest vendor and owner private keys sign the IMC. The Preamble holds the IMC signatures. The manifest IMC vendor signatures are optional and are validated only if the Flags field Bit 0 is set to 1. Up to 127 image hashes will be supported.
 
-An authorization manifest may set the vendor-signed `DEBUG_IMAGE` flag to identify a vendor-authorized debug manifest. `DEBUG_IMAGE` requires `VENDOR_SIGNATURE_REQUIRED`, subsystem mode, asserted `SS_DEBUG_INTENT`, and clear `SS_STRAP_GENERIC[3][31]` (`DISABLE_VENDOR_DEBUG_IMAGES`). Runtime evaluates this policy only after authenticating the firmware-vendor-signed preamble fields. Existing owner endorsement and IMC signature verification remain required.
+An authorization manifest may set the vendor-signed `DEBUG_IMAGE` flag to identify a vendor-authorized debug manifest. `DEBUG_IMAGE` requires `VENDOR_SIGNATURE_REQUIRED`, subsystem mode, asserted `SS_DEBUG_INTENT`, and clear `SS_FW_FEATURE_CFG.VENDOR_DEBUG_IMAGES_DIS`. Runtime evaluates this policy only after authenticating the firmware-vendor-signed preamble fields. Existing owner endorsement and IMC signature verification remain required.
 
 #### Caliptra Measurement Manifest Keys Endorsement Verification Steps
 
@@ -1184,9 +1198,9 @@ Command Code: `0x494E_464F` ("INFO")
 | vendor_ecc384_pub_key_index | u32      | Index of the vendor ECC public key used for verification. **Only present in FW 2.0.2+ and 2.1.1+.**                                                 |
 | vendor_pqc_pub_key_index    | u32      | Index of the vendor PQC public key used for verification. **Only present in FW 2.0.2+ and 2.1.1+.**                                                 |
 | soc_manifest_current_svn    | u32      | SVN of the authorization manifest accepted by `SET_AUTH_MANIFEST`, or zero if none has been accepted.                                              |
-| soc_manifest_min_svn        | u32      | Minimum SoC manifest SVN encoded in `FUSE_SOC_MANIFEST_SVN` and enforced by `SET_AUTH_MANIFEST` when anti-rollback checks are enabled.               |
+| soc_manifest_min_svn        | u32      | Numeric minimum SoC manifest SVN in `FUSE_SOC_MANIFEST_SVN[0]`, enforced by `SET_AUTH_MANIFEST` when anti-rollback checks are enabled.               |
 | owner_auth_manifest_current_svn | u32   | SVN of the owner authorization manifest accepted by `SET_OWNER_AUTH_MANIFEST`, or zero if none has been accepted.                                  |
-| owner_auth_manifest_min_svn | u32      | Minimum owner authorization manifest SVN encoded in `SS_STRAP_GENERIC[3][15:8]` and enforced by `SET_OWNER_AUTH_MANIFEST` when anti-rollback checks are enabled. |
+| owner_auth_manifest_min_svn | u32      | Numeric minimum owner authorization manifest SVN in `FUSE_SOC_MANIFEST_SVN[2]`, enforced by `SET_OWNER_AUTH_MANIFEST` when anti-rollback checks are enabled. |
 | debug_policy                | u32      | Active vendor-authorized debug policy. Bit 0 (`DEBUG_FIRMWARE_ACTIVE`) indicates that the active firmware bundle is marked as debug. Bit 1 (`DEBUG_AUTH_MANIFEST_ACTIVE`) indicates that the installed SoC authorization manifest is marked as debug. Bits 31:2 are zero. |
 
 ### VERSION
@@ -1440,7 +1454,7 @@ Command Code: `0x4154_4D4E` ("ATMN")
 | VENDOR_SIGNATURE_REQUIRED | 1 << 0    |
 | DEBUG_IMAGE               | 1 << 1    |
 
-`DEBUG_IMAGE` is valid only when `VENDOR_SIGNATURE_REQUIRED` is also set. Runtime rejects an invalid combination with `RUNTIME_AUTH_MANIFEST_INVALID_FLAGS`. Runtime rejects a debug manifest unless it is running in subsystem mode with `SS_DEBUG_INTENT` asserted and `SS_STRAP_GENERIC[3][31]` clear, returning `RUNTIME_AUTH_MANIFEST_DEBUG_IMAGE_NOT_ALLOWED`. Existing vendor and owner authentication remain required.
+`DEBUG_IMAGE` is valid only when `VENDOR_SIGNATURE_REQUIRED` is also set. Runtime rejects an invalid combination with `RUNTIME_AUTH_MANIFEST_INVALID_FLAGS`. Runtime rejects a debug manifest unless it is running in subsystem mode with `SS_DEBUG_INTENT` asserted and `SS_FW_FEATURE_CFG.VENDOR_DEBUG_IMAGES_DIS` clear, returning `RUNTIME_AUTH_MANIFEST_DEBUG_IMAGE_NOT_ALLOWED`. Existing vendor and owner authentication remain required.
 
 After a successful `SET_AUTH_MANIFEST`, Runtime sets `FW_INFO.debug_policy[1]` for a debug manifest and clears it for a normal manifest. Failed installations and `VERIFY_AUTH_MANIFEST` do not change the active bit. The bit survives warm and update resets, is cleared on cold reset, and is not modified by `SET_OWNER_AUTH_MANIFEST`.
 
@@ -1452,7 +1466,7 @@ After a successful `SET_AUTH_MANIFEST`, Runtime sets `FW_INFO.debug_policy[1]` f
 | Image Hash              | u8[48]      | SHA2-384 hash of a SOC image. |
 | Image_id                | u32            | This corresponds to the `Image Identifier` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
 | Component_id            | u32            | This corresponds to the `Component Id` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
-| flags                   | u32            | This corresponds to the `flags` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
+| flags                   | u32            | This corresponds to the `flags` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md). Bit 3 requests single-DWORD DMA reads when Runtime hashes the image from its load or staging address. If clear, Runtime uses burst DMA reads. |
 | Image Load Address High | u32          | This corresponds to the `Image Load Address High` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
 | Image Load Address Low  | u32          | This corresponds to the `Image Load Address Low` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
 | Staging Address High    | u32          | This corresponds to the `Staging Address High` field in the [SoC Manifest](https://github.com/chipsalliance/caliptra-sw/blob/main/auth-manifest/README.md) |
@@ -1480,13 +1494,18 @@ Verification chain:
 
 1. The manifest's `owner_pub_keys` are signed by the firmware-image owner key (latched from FMC at boot via `manifest1.preamble.owner_pub_keys`). This signature also covers the policy fields `version`, `svn`, `flags`, and `owner_pub_keys`.
 2. The manifest's IMC is signed by the manifest's own `owner_pub_keys`, which were just verified to chain to the firmware-image owner key.
-3. The manifest's `svn` is checked against the floor encoded in `SS_STRAP_GENERIC[3][15:8]`. The check is skipped when the lifecycle is `Unprovisioned` or anti-rollback is disabled.
+3. The manifest's `svn` is checked against numeric `FUSE_SOC_MANIFEST_SVN[2]`. The check is skipped when the lifecycle is `Unprovisioned` or anti-rollback is disabled.
 
 #### Owner Authorization Manifest Minimum SVN
 
-`SS_STRAP_GENERIC[3][15:8]` carries a binary value in the range `0..255`; it does not carry a fuse bitmap. Before Caliptra starts, platform firmware is responsible for deriving the owner-manifest minimum SVN from the platform's monotonic storage and programming the resulting integer into this strap. The strap is then locked by `CPTRA_FUSE_WR_DONE`.
+`FUSE_SOC_MANIFEST_SVN[2]` carries the numeric owner-manifest minimum, independent
+of the SoC-manifest minimum in word `[0]`. Owner manifest SVNs retain their existing
+`0..255` limit. Before fuse completion, platform firmware derives the minimum
+from its monotonic storage and programs the resulting integer into word `[2]`.
+`CPTRA_FUSE_WR_DONE` then locks it until a power cycle. The old strap field is ignored.
 
-This software interface does not define a new Caliptra fuse field. If a platform uses the same thermometer encoding as the existing SVN fuses, a 256-bit-aligned platform field can use bits 0 through 254 to encode SVN values 1 through 255, with all zeros encoding SVN 0 and bit 255 reserved. The authoritative physical fuse allocation belongs to the SoC/platform fuse-controller specification.
+Physical OTP allocation and encoding remain platform-defined. The corresponding
+MCU OTP conversion and MCU-runtime word `[1]` enforcement are separate work.
 
 The maximum IMC capacity is 32 entries. Every active `fw_id` must be unique within this manifest and must not appear in the installed vendor + owner manifest. A collision rejects the command without replacing either active collection. Each successful call replaces the existing owner-only collection.
 
@@ -1499,7 +1518,7 @@ The maximum IMC capacity is 32 entries. Every active `fw_id` must be unique with
 | preamble\_marker                      | u32          | Marker needs to be `0x4D4F_574F` ("OWOM" little-endian) for the preamble to be valid. |
 | preamble\_size                        | u32          | Size of the Owner Authorization Manifest Preamble. |
 | preamble\_version                     | u32          | Version of the preamble. |
-| preamble\_svn                         | u32          | Security version, range `[0, 255]`. Checked against `SS_STRAP_GENERIC[3][15:8]`. |
+| preamble\_svn                         | u32          | Security version, range `[0, 255]`. Checked against numeric `FUSE_SOC_MANIFEST_SVN[2]`. |
 | preamble\_flags                       | u32          | Reserved. Must be zero. |
 | preamble\_owner\_ecc384\_key          | u32[24]      | Owner ECC384 public key carried in the manifest. |
 | preamble\_owner\_pqc\_key             | u32[648]     | Owner MLDSA-87 or LMS-SHA192-H15 public key carried in the manifest. |
@@ -1619,7 +1638,7 @@ Command Code: `0x4143_5446` ("ACTF")
 | -------------- | -------------- | --------------------------------------------------------------------------- |
 | chksum         | u32            | Checksum over other input arguments, computed by the caller. Little endian. |
 | count          | u32            | Number of image_ids to activate. Item count of image_ids array parameter |
-| mcu_image_size | u32            | Size of MCU image, if included in the activation |
+| mcu_image_size | u32            | Size of MCU image in bytes, if included in the activation. Must not exceed MCU SRAM capacity for hitless updates. |
 | image_ids      | Array of u8[4] | Array of Image ids in little-endian format                           |
 | flags          | u32            | Optional flags (see below). Caliptra runtime 2.1.1+ only.                  |
 
@@ -1632,6 +1651,28 @@ Command Code: `0x4143_5446` ("ACTF")
 
 Unknown flag bits are rejected with `RUNTIME_MAILBOX_INVALID_PARAMS`.
 
+For MCU hitless updates (`INITIAL_ACTIVATE` clear), the MCU entry in the
+selected authorization manifest must set `image_load_address` to the full
+64-bit MCU SRAM address, `MCI_BASE + 0x00c00000`. The entire source and
+destination byte ranges must fit in the 64-bit AXI address space without
+wrapping. `mcu_image_size` must not exceed the MCU SRAM capacity reported by
+MCI `HW_CONFIG1.MCU_SRAM_SIZE` (in KB, multiplied by 1024 to obtain bytes).
+An image exactly equal to that capacity is permitted.
+
+Runtime rejects a load-address mismatch, address-range overflow, or oversized
+image with `IMAGE_VERIFIER_ACTIVATION_FAILED` before changing the MCU reset
+reason, execution-control bits, SRAM contents, or MCU firmware DPE measurement.
+These requirements apply to both vendor + owner and owner-only manifests.
+The address-range checks prevent arithmetic overflow; they do not establish
+that the staging memory is mapped or accessible.
+
+Runtime copies `mcu_image_size` bytes from `image_staging_address` to that
+MCU SRAM destination, then authorizes the image at `image_load_address`.
+Requiring these destination addresses to match binds the post-copy digest
+check to the installed firmware. After successful authorization, Runtime
+updates the MCU firmware DPE measurement and enables execution. SoC-only
+activation does not impose these MCU address and size requirements.
+
 `INITIAL_ACTIVATE` is used exclusively by MCU ROM at the tail of the
 `EncryptedFirmware` boot flow. MCU ROM has already loaded firmware into MCU
 SRAM via `RI_DOWNLOAD_ENCRYPTED_FIRMWARE` and decrypted it in place via
@@ -1639,7 +1680,8 @@ SRAM via `RI_DOWNLOAD_ENCRYPTED_FIRMWARE` and decrypted it in place via
 
 - Skips the hitless-update steps (set `RESET_REASON.FwHitlessUpd`, clear
   `FW_EXEC_CTRL`, wait for MCU reset request and reset assertion, DMA-reload
-  from staging, re-`AuthorizeAndStash`).
+  from staging, re-`AuthorizeAndStash`), including the hitless load-address
+  and range/size requirements above.
 - Just publishes `FW_EXEC_CTRL[MCU]` (and any other requested bits) so that
   MCI's `BOOT_RST_MCU` state releases MCU from reset on the next warm reset
   that MCU ROM triggers.
@@ -2804,7 +2846,7 @@ If a key usage other than HMAC is desired, then the KDF or HKDF
 mailbox functions can be used to derive a key from the returned CMK.
 
 `key_type = OwnerKey` is only available in subsystem mode when the Stable Owner
-Key strap is enabled (`SS_STRAP_GENERIC[3]` bit 0 set to 1) and OCP LOCK is not
+Key configuration is enabled (`SS_FW_FEATURE_CFG.STABLE_OWNER_KEY_EN`) and OCP LOCK is not
 enabled. If these requirements are not met, the command fails with
 `CMB_STABLE_OWNER_KEY_NOT_AVAILABLE`.
 
@@ -3181,6 +3223,55 @@ Command Code: `0x4645_5052` ("FEPR")
 | partition   | u32      | FE partition number (valid values: 0–3).
 
 `FE_PROG` returns no output arguments other than the mailbox response header.
+
+### ZEROIZE\_UDS\_FE
+
+Permanently zeroizes the selected UDS and Field Entropy (FE) OTP partitions, including
+their seeds, digests, and zeroization markers. Runtime uses the same OTP programming
+flow and read-back verification as ROM.
+
+This command is restricted to **PL0** and **subsystem mode**, where Caliptra can
+access the OTP fuse controller through DMA. The caller must authorize the destructive
+operation before submitting it; this command does not implement the MCU's external
+challenge/signature authorization protocol.
+
+Command Code: `0x5A45_5546` ("ZEUF")
+
+*Table: `ZEROIZE_UDS_FE` input arguments*
+
+| **Name** | **Type** | **Description**
+| -------- | -------- | ---------------
+| chksum   | u32      | Checksum over other input arguments, computed by the caller. Little endian.
+| flags    | u32      | Partition-selection bitmask: bit 0 selects UDS; bits 1 through 4 select FE0 through FE3.
+
+At least one partition must be selected. Reserved flag bits must be zero. Invalid
+lengths or flags are rejected before OTP changes or shutdown. Requests from PL1 or
+outside subsystem mode are also rejected without changing OTP or shutting down.
+
+*Table: `ZEROIZE_UDS_FE` output arguments*
+
+| **Name**    | **Type** | **Description**
+| ----------- | -------- | ---------------
+| chksum      | u32      | Checksum over other output arguments, computed by Caliptra. Little endian.
+| fips_status | u32      | Standard mailbox response status.
+| dpe_result  | u32      | `0` if every selected partition passed zeroization read-back verification; `1` if zeroization failed.
+
+The response is the existing 12-byte `ZeroizeUdsFeResp` used by ROM. Callers must
+read and check `dpe_result`; successful mailbox transport or an 8-byte response
+header alone is not proof of zeroization. A failure may follow partial, irreversible
+zeroization, and unattempted or unselected partitions are not reported as zeroized.
+The specific OTP error is reported in `CPTRA_FW_ERROR_NON_FATAL`.
+
+After any valid zeroization attempt, Runtime clears its cryptographic engines,
+key vault, and persistent state using the existing shutdown cleanup path. It returns
+the result and enters the terminal `RUNTIME_SHUTDOWN` state even if OTP zeroization
+failed. A cleanup failure causes mailbox command failure and still enters terminal
+shutdown. Caliptra cannot service further Runtime requests without reset.
+
+This command does not transition the lifecycle controller to RMA or update the
+MCU's field-entropy state markers. The MCU remains responsible for those operations,
+and must not request RMA unless zeroization has succeeded and the required OTP state
+has been verified.
 
 ### PRODUCTION\_AUTH\_DEBUG\_UNLOCK\_REQ
 

@@ -43,9 +43,19 @@ Build the development firmware with:
 cargo xtask --rev 2.2 build all
 ```
 
-The pinned SS snapshot is `6e5ed764da55bd1ddaf4db7bab0d49666f28e0ab`,
-which selects RTL `7b901d59ba92d8d3b19b7f63ecb77806404503f2`. This is
+The pinned SS snapshot is `743d5f7eaa9a946f405b9087c7ffd2fbb38e1543`,
+which selects RTL `f9bc5ab97b885b5e31ccb062eca16634a8e61b5a`. This is
 2.2 development hardware, not a finalized or qualified 2.2 release.
+
+Core reads OTP-controller layout and feature controls from `SS_OTP_FC_STATUS_CFG`,
+`SS_OTP_FC_CMD_CFG`, and `SS_FW_FEATURE_CFG`. The former generic-strap fields no
+longer control these settings. MCU/SoC firmware must populate the named registers
+before fuse completion. This Core migration does not implement MCU provisioning
+or change the general fuse-initialization/warm-reset contract.
+
+Firmware retains `SS_STRAP_GENERIC[2]` for entropy window, lane selection, and
+bypass settings. The generated `ENTROPY_CONFIG_2` accessors are not used for
+configuration on this branch.
 
 ## Updating latest hardware
 

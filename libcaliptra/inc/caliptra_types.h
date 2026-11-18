@@ -99,7 +99,7 @@ struct caliptra_get_fmc_alias_ecc384_cert_resp
 {
     struct caliptra_resp_header hdr;
     uint32_t data_size;
-    uint8_t data[1024];
+    uint8_t data[9216];
 };
 
 struct caliptra_get_rt_alias_ecc384_cert_resp
@@ -341,6 +341,13 @@ struct caliptra_set_auth_manifest_req
     struct caliptra_req_header hdr;
     uint32_t manifest_size;
     uint8_t manifest[34 * 1024];
+};
+
+struct caliptra_set_owner_auth_manifest_req
+{
+    struct caliptra_req_header hdr;
+    uint32_t manifest_size;
+    uint8_t manifest[24 * 1024];
 };
 
 struct caliptra_authorize_and_stash_req
